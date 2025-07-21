@@ -61,6 +61,12 @@ def create_app() -> FastAPI:
     function_manager = FunctionCallManager()
     document_store = DocumentStore()
     
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Cleanup on shutdown."""
+        await orchestrator.cleanup()
+        document_store.close()
+    
     @app.get("/")
     async def root():
         """Root endpoint."""

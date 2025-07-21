@@ -3,8 +3,12 @@
 import asyncio
 import click
 import json
+import warnings
 from pathlib import Path
 from loguru import logger
+
+# Suppress ResourceWarnings for unclosed transports (temporary fix)
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 from src.config import settings
 from src.agents.research_orchestrator import ResearchOrchestrator
@@ -26,30 +30,33 @@ def research(query: str, interactive: bool, output: str):
     async def run_research():
         logger.info(f"Starting research for query: {query}")
         
-        orchestrator = ResearchOrchestrator()
-        
-        if interactive:
-            # Interactive mode with user confirmation
-            result = await orchestrator.run_interactive_research(query)
-        else:
-            # Direct execution
-            result = await orchestrator.run_research(query)
-        
-        logger.info("Research completed")
-        
-        # Display results
-        print("\n" + "="*80)
-        print("RESEARCH REPORT")
-        print("="*80)
-        print(result.final_report)
-        
-        # Save to file if requested
-        if output:
-            output_path = Path(output)
-            output_path.write_text(result.final_report)
-            print(f"\nReport saved to: {output_path}")
+        async with ResearchOrchestrator() as orchestrator:
+            if interactive:
+                # Interactive mode with user confirmation
+                result = await orchestrator.run_interactive_research(query)
+            else:
+                # Direct execution
+                result = await orchestrator.run_research(query)
+            
+            logger.info("Research completed")
+            
+            # Display results
+            print("\n" + "="*80)
+            print("RESEARCH REPORT")
+            print("="*80)
+            print(result.final_report)
+            
+            # Save to file if requested
+            if output:
+                output_path = Path(output)
+                output_path.write_text(result.final_report)
+                print(f"\nReport saved to: {output_path}")
     
-    asyncio.run(run_research())
+    try:
+        asyncio.run(run_research())
+    except Exception as e:
+        logger.error(f"Research failed: {e}")
+        print(f"Error: {e}")
 
 
 @cli.command()
@@ -94,11 +101,13 @@ def status():
 
 @cli.command()
 @click.option("--data-dir", "-d", type=click.Path(exists=True, path_type=Path), 
-              default="./data", help="Directory containing documents to ingest")
+              default="./data", help="Root directory containing documents to ingest recursively")
 @click.option("--force-reindex", "-f", is_flag=True, help="Force reindexing of all documents")
 @click.option("--clear-existing", "-c", is_flag=True, help="Clear existing documents before ingestion")
-def ingest(data_dir: Path, force_reindex: bool, clear_existing: bool):
-    """Ingest documents from the specified directory."""
+@click.option("--max-depth", type=int, default=None, help="Maximum directory depth to recurse")
+@click.option("--exclude-dirs", multiple=True, help="Directory names to exclude (can be used multiple times)")
+def ingest(data_dir: Path, force_reindex: bool, clear_existing: bool, max_depth: int, exclude_dirs: tuple):
+    """Ingest documents from the specified directory and all subdirectories recursively."""
     async def run_ingestion():
         from src.ingestion.ingest_documents import DocumentIngestionPipeline
         
@@ -108,9 +117,19 @@ def ingest(data_dir: Path, force_reindex: bool, clear_existing: bool):
             logger.info("Clearing existing documents...")
             pipeline.store.clear_all_documents()
         
-        await pipeline.ingest_directory(data_dir, force_reindex)
+        # Log ingestion parameters
+        logger.info(f"Starting recursive ingestion:")
+        logger.info(f"  Root directory: {data_dir}")
+        logger.info(f"  Max depth: {max_depth if max_depth else 'unlimited'}")
+        logger.info(f"  Excluded directories: {list(exclude_dirs) if exclude_dirs else 'none'}")
+        
+        await pipeline.ingest_directory(data_dir, force_reindex, max_depth, exclude_dirs)
     
-    asyncio.run(run_ingestion())
+    try:
+        asyncio.run(run_ingestion())
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        print(f"Error: {e}")
 
 
 @cli.command()

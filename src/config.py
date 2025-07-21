@@ -2,7 +2,8 @@
 
 import os
 from typing import Optional
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -10,11 +11,11 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    openai_model: str = Field("gpt-4-1", env="OPENAI_MODEL")
+    openai_model: str = Field("gpt-4-turbo-preview", env="OPENAI_MODEL")
     
     # Vector Database Configuration
     chroma_persist_directory: str = Field("./data/chroma_db", env="CHROMA_PERSIST_DIRECTORY")
-    embedding_model: str = Field("sentence-transformers/all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
+    embedding_model: str = Field("text-embedding-3-small", env="EMBEDDING_MODEL")
     
     # Document Processing Configuration
     document_chunk_size: int = Field(1000, env="DOCUMENT_CHUNK_SIZE")

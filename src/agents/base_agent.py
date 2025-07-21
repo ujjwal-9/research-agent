@@ -59,6 +59,19 @@ class BaseAgent(ABC):
         
         logger.info(f"Initialized {role.value} agent: {agent_id}")
     
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - properly close the client."""
+        await self.close()
+    
+    async def close(self):
+        """Properly close the OpenAI client."""
+        if hasattr(self.client, 'close'):
+            await self.client.close()
+    
     @abstractmethod
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """Process a task and return results."""

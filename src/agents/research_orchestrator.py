@@ -36,6 +36,20 @@ class ResearchOrchestrator:
         self.synthesizer = SynthesizerAgent()
         self.active_sessions: Dict[str, ResearchSession] = {}
     
+    async def cleanup(self):
+        """Properly close all agent connections."""
+        await self.planner.close()
+        await self.researcher.close()
+        await self.synthesizer.close()
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()
+    
     async def run_research(self, query: str, session_id: str = None) -> ResearchSession:
         """Run complete research workflow without user interaction."""
         if session_id is None:

@@ -42,6 +42,11 @@ class SystemEvaluator:
         self.orchestrator = ResearchOrchestrator()
         self.document_store = DocumentStore()
     
+    async def cleanup(self):
+        """Cleanup resources."""
+        await self.orchestrator.cleanup()
+        self.document_store.close()
+    
     async def evaluate_query_set(self, queries: List[str]) -> EvaluationResult:
         """Evaluate system performance on a set of queries."""
         logger.info(f"Starting evaluation with {len(queries)} queries")

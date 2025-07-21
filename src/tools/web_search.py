@@ -3,7 +3,7 @@
 import asyncio
 from typing import List, Dict, Any, Optional
 import aiohttp
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from loguru import logger
 
 from src.config import settings
