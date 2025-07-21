@@ -1,0 +1,229 @@
+"""Main entry point for the research system."""
+
+import asyncio
+import click
+import json
+from pathlib import Path
+from loguru import logger
+
+from src.config import settings
+from src.agents.research_orchestrator import ResearchOrchestrator
+from src.api.server import create_app
+
+
+@click.group()
+def cli():
+    """Research System CLI."""
+    pass
+
+
+@cli.command()
+@click.option("--query", "-q", required=True, help="Research query")
+@click.option("--interactive", "-i", is_flag=True, help="Interactive mode")
+@click.option("--output", "-o", help="Output file for the report")
+def research(query: str, interactive: bool, output: str):
+    """Run a research query."""
+    async def run_research():
+        logger.info(f"Starting research for query: {query}")
+        
+        orchestrator = ResearchOrchestrator()
+        
+        if interactive:
+            # Interactive mode with user confirmation
+            result = await orchestrator.run_interactive_research(query)
+        else:
+            # Direct execution
+            result = await orchestrator.run_research(query)
+        
+        logger.info("Research completed")
+        
+        # Display results
+        print("\n" + "="*80)
+        print("RESEARCH REPORT")
+        print("="*80)
+        print(result.final_report)
+        
+        # Save to file if requested
+        if output:
+            output_path = Path(output)
+            output_path.write_text(result.final_report)
+            print(f"\nReport saved to: {output_path}")
+    
+    asyncio.run(run_research())
+
+
+@cli.command()
+@click.option("--host", default=settings.api_host, help="API host")
+@click.option("--port", default=settings.api_port, help="API port")
+def serve(host: str, port: int):
+    """Start the API server."""
+    import uvicorn
+    
+    app = create_app()
+    uvicorn.run(app, host=host, port=port)
+
+
+@cli.command()
+def status():
+    """Check system status."""
+    logger.info("Checking system status...")
+    
+    # Check document index
+    from src.ingestion.document_store import DocumentStore
+    store = DocumentStore()
+    doc_count = store.get_document_count()
+    unique_docs = store.get_unique_documents()
+    
+    print(f"Documents indexed: {doc_count} chunks from {len(unique_docs)} documents")
+    print(f"Vector database: {settings.chroma_persist_directory}")
+    print(f"OpenAI model: {settings.openai_model}")
+    
+    # Show document types
+    if unique_docs:
+        file_types = {}
+        for doc in unique_docs:
+            file_type = doc.get('file_type', 'unknown')
+            file_types[file_type] = file_types.get(file_type, 0) + 1
+        
+        print("Document types:")
+        for file_type, count in file_types.items():
+            print(f"  {file_type}: {count}")
+    
+    print("System ready ✓")
+
+
+@cli.command()
+@click.option("--data-dir", "-d", type=click.Path(exists=True, path_type=Path), 
+              default="./data", help="Directory containing documents to ingest")
+@click.option("--force-reindex", "-f", is_flag=True, help="Force reindexing of all documents")
+@click.option("--clear-existing", "-c", is_flag=True, help="Clear existing documents before ingestion")
+def ingest(data_dir: Path, force_reindex: bool, clear_existing: bool):
+    """Ingest documents from the specified directory."""
+    async def run_ingestion():
+        from src.ingestion.ingest_documents import DocumentIngestionPipeline
+        
+        pipeline = DocumentIngestionPipeline()
+        
+        if clear_existing:
+            logger.info("Clearing existing documents...")
+            pipeline.store.clear_all_documents()
+        
+        await pipeline.ingest_directory(data_dir, force_reindex)
+    
+    asyncio.run(run_ingestion())
+
+
+@cli.command()
+@click.option("--query", "-q", required=True, help="Search query")
+@click.option("--max-results", "-n", default=10, help="Maximum number of results")
+@click.option("--file-types", help="Comma-separated list of file types to filter by")
+def search(query: str, max_results: int, file_types: str):
+    """Search indexed documents."""
+    from src.ingestion.document_store import DocumentStore
+    
+    store = DocumentStore()
+    
+    file_type_list = None
+    if file_types:
+        file_type_list = [ft.strip() for ft in file_types.split(",")]
+    
+    results = store.search_documents(
+        query=query,
+        n_results=max_results,
+        file_types=file_type_list
+    )
+    
+    print(f"Found {len(results)} results for query: {query}")
+    print("="*60)
+    
+    for i, result in enumerate(results, 1):
+        metadata = result.get("metadata", {})
+        print(f"\n{i}. {metadata.get('title', 'Untitled')}")
+        print(f"   File: {metadata.get('file_path', 'Unknown')}")
+        print(f"   Type: {metadata.get('file_type', 'Unknown')}")
+        if result.get("distance"):
+            print(f"   Relevance: {1.0 - result['distance']:.2f}")
+        print(f"   Content: {result.get('content', '')[:200]}...")
+
+
+@cli.command()
+def test():
+    """Run system tests."""
+    async def run_tests():
+        from scripts.quick_test import main as test_main
+        await test_main()
+    
+    asyncio.run(run_tests())
+
+
+@cli.command()
+@click.option("--queries-file", help="JSON file containing test queries")
+@click.option("--output", "-o", help="Output file for evaluation results")
+def evaluate(queries_file: str, output: str):
+    """Evaluate system performance."""
+    async def run_evaluation():
+        from src.evaluation.evaluate_system import SystemEvaluator, DEFAULT_TEST_QUERIES
+        
+        evaluator = SystemEvaluator()
+        
+        # Load queries
+        if queries_file:
+            with open(queries_file, 'r') as f:
+                test_queries = json.load(f)
+        else:
+            test_queries = DEFAULT_TEST_QUERIES
+        
+        print(f"Running evaluation with {len(test_queries)} queries...")
+        result = await evaluator.evaluate_query_set(test_queries)
+        
+        # Display results
+        print("\n" + "="*60)
+        print("EVALUATION RESULTS")
+        print("="*60)
+        
+        print(f"Queries evaluated: {len(result.test_queries)}")
+        print("\nAverage Metrics:")
+        for metric, value in result.average_metrics.items():
+            print(f"  {metric}: {value}")
+        
+        print("\nRecommendations:")
+        for rec in result.recommendations:
+            print(f"  • {rec}")
+        
+        # Save results
+        output_file = output or "evaluation_results.json"
+        with open(output_file, "w") as f:
+            json.dump(result.__dict__, f, indent=2, default=str)
+        
+        print(f"\nDetailed results saved to: {output_file}")
+    
+    asyncio.run(run_evaluation())
+
+
+@cli.command()
+def setup():
+    """Set up the development environment."""
+    from scripts.setup import setup_environment, check_dependencies
+    
+    success = setup_environment() and check_dependencies()
+    
+    if success:
+        print("\n🎉 Setup complete! Next steps:")
+        print("1. Configure your .env file with API keys")
+        print("2. Run document ingestion: python -m src.main ingest")
+        print("3. Test the system: python -m src.main test")
+        print("4. Start researching: python -m src.main research -q 'your query'")
+    else:
+        print("\n❌ Setup failed. Please fix the issues above.")
+
+
+if __name__ == "__main__":
+    # Configure logging
+    logger.remove()
+    logger.add(
+        lambda msg: print(msg, end=""),
+        level=settings.log_level,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+    )
+    
+    cli()

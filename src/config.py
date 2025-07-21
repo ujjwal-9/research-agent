@@ -1,0 +1,44 @@
+"""Configuration management for the research system."""
+
+import os
+from typing import Optional
+from pydantic import BaseSettings, Field
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+    
+    # OpenAI Configuration
+    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
+    openai_model: str = Field("gpt-4-1", env="OPENAI_MODEL")
+    
+    # Vector Database Configuration
+    chroma_persist_directory: str = Field("./data/chroma_db", env="CHROMA_PERSIST_DIRECTORY")
+    embedding_model: str = Field("sentence-transformers/all-MiniLM-L6-v2", env="EMBEDDING_MODEL")
+    
+    # Document Processing Configuration
+    document_chunk_size: int = Field(1000, env="DOCUMENT_CHUNK_SIZE")
+    document_chunk_overlap: int = Field(200, env="DOCUMENT_CHUNK_OVERLAP")
+    
+    # System Configuration
+    log_level: str = Field("INFO", env="LOG_LEVEL")
+    max_concurrent_tasks: int = Field(5, env="MAX_CONCURRENT_TASKS")
+    
+    # Web Search Configuration
+    duckduckgo_max_results: int = Field(10, env="DUCKDUCKGO_MAX_RESULTS")
+    
+    # API Configuration
+    api_host: str = Field("0.0.0.0", env="API_HOST")
+    api_port: int = Field(8000, env="API_PORT")
+    
+    # MCP Configuration
+    mcp_server_name: str = Field("research-system", env="MCP_SERVER_NAME")
+    mcp_server_version: str = Field("1.0.0", env="MCP_SERVER_VERSION")
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+# Global settings instance
+settings = Settings()
