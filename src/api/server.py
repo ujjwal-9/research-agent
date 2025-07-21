@@ -10,6 +10,8 @@ from loguru import logger
 from src.agents.research_orchestrator import ResearchOrchestrator
 from src.tools.function_calls import FunctionCallManager
 from src.ingestion.document_store import DocumentStore
+from src.knowledge_graph.hybrid_retriever import HybridRetriever
+from src.knowledge_graph.graph_store import KnowledgeGraphStore
 
 
 # Pydantic models for API
@@ -38,6 +40,20 @@ class DocumentSearchRequest(BaseModel):
     max_results: int = 10
 
 
+class HybridSearchRequest(BaseModel):
+    query: str
+    max_results: int = 10
+    include_graph: bool = True
+    include_rag: bool = True
+    graph_depth: int = 2
+    entity_boost: float = 1.5
+
+
+class EntityExpansionRequest(BaseModel):
+    entity_text: str
+    max_depth: int = 2
+
+
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
     
@@ -60,12 +76,16 @@ def create_app() -> FastAPI:
     orchestrator = ResearchOrchestrator()
     function_manager = FunctionCallManager()
     document_store = DocumentStore()
+    hybrid_retriever = HybridRetriever()
+    graph_store = KnowledgeGraphStore()
     
     @app.on_event("shutdown")
     async def shutdown_event():
         """Cleanup on shutdown."""
         await orchestrator.cleanup()
         document_store.close()
+        hybrid_retriever.close()
+        graph_store.close()
     
     @app.get("/")
     async def root():
@@ -80,10 +100,15 @@ def create_app() -> FastAPI:
     async def health_check():
         """Health check endpoint."""
         doc_count = document_store.get_document_count()
+        kg_stats = graph_store.get_graph_statistics()
         return {
             "status": "healthy",
             "documents_indexed": doc_count,
-            "active_sessions": len(orchestrator.active_sessions)
+            "active_sessions": len(orchestrator.active_sessions),
+            "knowledge_graph": {
+                "entities": kg_stats.get("total_entities", 0),
+                "relationships": kg_stats.get("total_relationships", 0)
+            }
         }
     
     @app.post("/research", response_model=ResearchResponse)
@@ -211,6 +236,99 @@ def create_app() -> FastAPI:
             }
         except Exception as e:
             logger.error(f"Document stats failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/search/hybrid")
+    async def hybrid_search(request: HybridSearchRequest):
+        """Perform hybrid search combining RAG and Knowledge Graph."""
+        try:
+            results = await hybrid_retriever.search(
+                query=request.query,
+                n_results=request.max_results,
+                include_graph=request.include_graph,
+                include_rag=request.include_rag,
+                graph_depth=request.graph_depth,
+                entity_boost=request.entity_boost
+            )
+            
+            # Convert results to serializable format
+            serialized_results = []
+            for result in results:
+                serialized_results.append({
+                    "content": result.content,
+                    "metadata": result.metadata,
+                    "source_type": result.source_type,
+                    "relevance_score": result.relevance_score,
+                    "entities": result.entities or [],
+                    "relationships": result.relationships or []
+                })
+            
+            return {
+                "success": True,
+                "results": serialized_results,
+                "total_found": len(serialized_results),
+                "search_type": "hybrid"
+            }
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/knowledge-graph/entity/expand")
+    async def expand_entity(request: EntityExpansionRequest):
+        """Get expanded information about an entity from the knowledge graph."""
+        try:
+            expansion = await hybrid_retriever.get_entity_expansion(
+                request.entity_text,
+                max_depth=request.max_depth
+            )
+            return {
+                "success": True,
+                "expansion": expansion
+            }
+        except Exception as e:
+            logger.error(f"Entity expansion failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/knowledge-graph/suggestions/{query}")
+    async def get_query_suggestions(query: str, limit: int = 5):
+        """Get related query suggestions based on knowledge graph."""
+        try:
+            suggestions = await hybrid_retriever.suggest_related_queries(query, limit=limit)
+            return {
+                "success": True,
+                "query": query,
+                "suggestions": suggestions
+            }
+        except Exception as e:
+            logger.error(f"Query suggestions failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/knowledge-graph/stats")
+    async def get_knowledge_graph_stats():
+        """Get knowledge graph statistics."""
+        try:
+            stats = graph_store.get_graph_statistics()
+            return {
+                "success": True,
+                "statistics": stats
+            }
+        except Exception as e:
+            logger.error(f"Knowledge graph stats failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/knowledge-graph/entities/{entity_type}")
+    async def get_entities_by_type(entity_type: str, limit: int = 50):
+        """Get entities by their type/label."""
+        try:
+            entities = graph_store.search_entities_by_type(entity_type, limit=limit)
+            return {
+                "success": True,
+                "entity_type": entity_type,
+                "entities": entities,
+                "total_found": len(entities)
+            }
+        except Exception as e:
+            logger.error(f"Entity search by type failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
     return app

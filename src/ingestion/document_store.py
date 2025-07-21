@@ -12,12 +12,14 @@ from loguru import logger
 
 from src.config import settings
 from src.ingestion.document_processor import ProcessedDocument
+from src.knowledge_graph.entity_extractor import EntityExtractor
+from src.knowledge_graph.graph_store import KnowledgeGraphStore
 
 
 class DocumentStore:
     """Manages document storage and retrieval using ChromaDB."""
 
-    def __init__(self):
+    def __init__(self, enable_knowledge_graph: bool = True):
         self.client = chromadb.PersistentClient(
             path=settings.chroma_persist_directory,
             settings=ChromaSettings(anonymized_telemetry=False),
@@ -30,6 +32,18 @@ class DocumentStore:
         # Initialize OpenAI client for embeddings
         self.openai_client = OpenAI(api_key=settings.openai_api_key)
         self.embedding_model = settings.embedding_model
+        
+        # Initialize knowledge graph components
+        self.enable_kg = enable_knowledge_graph
+        if self.enable_kg:
+            try:
+                self.entity_extractor = EntityExtractor()
+                self.graph_store = KnowledgeGraphStore()
+                logger.info("Knowledge graph integration enabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize knowledge graph: {e}")
+                self.enable_kg = False
+        
         logger.info(
             f"Initialized document store with {self.get_document_count()} documents"
         )
@@ -38,6 +52,9 @@ class DocumentStore:
         """Close the OpenAI client connection."""
         if hasattr(self.openai_client, 'close'):
             self.openai_client.close()
+        
+        if self.enable_kg and hasattr(self, 'graph_store'):
+            self.graph_store.close()
 
     async def store_document(self, document: ProcessedDocument) -> bool:
         """Store a processed document in the vector database."""
@@ -74,6 +91,10 @@ class DocumentStore:
                     embeddings=embeddings,
                 )
 
+                # Extract entities and relationships for knowledge graph
+                if self.enable_kg:
+                    await self._process_knowledge_graph(document, chunk_texts, chunk_ids)
+
                 logger.info(
                     f"Stored document {document.file_path} with {len(chunk_texts)} chunks"
                 )
@@ -85,6 +106,26 @@ class DocumentStore:
         except Exception as e:
             logger.error(f"Error storing document {document.file_path}: {e}")
             return False
+
+    async def _process_knowledge_graph(self, document: ProcessedDocument, chunk_texts: List[str], chunk_ids: List[str]):
+        """Process document chunks for knowledge graph extraction."""
+        try:
+            for i, (chunk_text, chunk_id) in enumerate(zip(chunk_texts, chunk_ids)):
+                # Extract entities and relationships from chunk
+                entities, relationships = await self.entity_extractor.extract_entities_and_relationships(
+                    chunk_text, chunk_id
+                )
+                
+                # Store in knowledge graph
+                if entities or relationships:
+                    await self.graph_store.store_entities_and_relationships(
+                        entities, relationships, document.file_path, str(i)
+                    )
+                    
+            logger.debug(f"Processed knowledge graph for {document.file_path}")
+            
+        except Exception as e:
+            logger.warning(f"Knowledge graph processing failed for {document.file_path}: {e}")
 
     def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings using OpenAI API."""

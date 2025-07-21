@@ -13,14 +13,15 @@ from src.config import settings
 
 
 class DocumentIngestionPipeline:
-    """Pipeline for ingesting documents into the system."""
+    """Pipeline for ingesting documents into the system with knowledge graph integration."""
     
-    def __init__(self):
+    def __init__(self, enable_knowledge_graph: bool = True):
         self.processor = DocumentProcessor(
             chunk_size=settings.document_chunk_size,
             chunk_overlap=settings.document_chunk_overlap
         )
-        self.store = DocumentStore()
+        self.store = DocumentStore(enable_knowledge_graph=enable_knowledge_graph)
+        self.enable_kg = enable_knowledge_graph
     
     async def ingest_directory(self, data_dir: Path, force_reindex: bool = False, 
                              max_depth: int = None, exclude_dirs: tuple = ()) -> None:
@@ -86,6 +87,14 @@ class DocumentIngestionPipeline:
         
         logger.info(f"Document ingestion completed: {successful} successful, {failed} failed")
         logger.info(f"Total documents in store: {self.store.get_document_count()}")
+        
+        # Log knowledge graph statistics if enabled
+        if self.enable_kg and hasattr(self.store, 'graph_store'):
+            try:
+                kg_stats = self.store.graph_store.get_graph_statistics()
+                logger.info(f"Knowledge graph: {kg_stats.get('total_entities', 0)} entities, {kg_stats.get('total_relationships', 0)} relationships")
+            except Exception as e:
+                logger.warning(f"Failed to get knowledge graph statistics: {e}")
     
     def _log_directory_summary(self, root_dir: Path, files: List[Path]) -> None:
         """Log a summary of the directory structure and files found."""
@@ -152,6 +161,74 @@ class DocumentIngestionPipeline:
                 logger.warning(f"Cannot access file {file_path}: {e}")
         
         return filtered_files
+    
+    async def rebuild_knowledge_graph(self) -> dict:
+        """Rebuild the knowledge graph from existing documents."""
+        if not self.enable_kg:
+            return {"success": False, "error": "Knowledge graph not enabled"}
+        
+        try:
+            logger.info("Starting knowledge graph rebuild")
+            
+            # Clear existing graph
+            if hasattr(self.store, 'graph_store'):
+                self.store.graph_store.clear_graph()
+            
+            # Get all documents
+            unique_docs = self.store.get_unique_documents()
+            
+            processed_count = 0
+            failed_count = 0
+            
+            for doc_info in unique_docs:
+                try:
+                    file_path = doc_info["file_path"]
+                    
+                    # Get document chunks
+                    chunks = self.store.get_document_by_path(file_path)
+                    
+                    # Process each chunk for knowledge graph extraction
+                    for chunk in chunks:
+                        chunk_id = str(chunk["metadata"].get("chunk_index", 0))
+                        
+                        # Extract entities and relationships
+                        if hasattr(self.store, 'entity_extractor'):
+                            entities, relationships = await self.store.entity_extractor.extract_entities_and_relationships(
+                                chunk["content"], chunk_id
+                            )
+                            
+                            # Store in knowledge graph
+                            if entities or relationships:
+                                await self.store.graph_store.store_entities_and_relationships(
+                                    entities, relationships, file_path, chunk_id
+                                )
+                    
+                    processed_count += 1
+                    if processed_count % 10 == 0:
+                        logger.info(f"Processed {processed_count}/{len(unique_docs)} documents")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process {doc_info.get('file_path', 'unknown')} for knowledge graph: {e}")
+                    failed_count += 1
+            
+            # Get final statistics
+            kg_stats = {}
+            if hasattr(self.store, 'graph_store'):
+                kg_stats = self.store.graph_store.get_graph_statistics()
+            
+            logger.info(f"Knowledge graph rebuild completed: {processed_count} documents processed, {failed_count} failed")
+            logger.info(f"Final graph: {kg_stats.get('total_entities', 0)} entities, {kg_stats.get('total_relationships', 0)} relationships")
+            
+            return {
+                "success": True,
+                "processed_documents": processed_count,
+                "failed_documents": failed_count,
+                "knowledge_graph_stats": kg_stats
+            }
+            
+        except Exception as e:
+            logger.error(f"Knowledge graph rebuild failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _process_file_with_semaphore(self, semaphore: asyncio.Semaphore, file_path: Path) -> bool:
         """Process a single file with concurrency control."""

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from src.agents.base_agent import BaseAgent, AgentRole
 from src.ingestion.document_store import DocumentStore
+from src.knowledge_graph.hybrid_retriever import HybridRetriever
 from src.tools.web_search import WebSearchTool
 from loguru import logger
 
@@ -28,6 +29,7 @@ class ResearcherAgent(BaseAgent):
     def __init__(self, agent_id: str = "researcher"):
         super().__init__(agent_id, AgentRole.RESEARCHER)
         self.document_store = DocumentStore()
+        self.hybrid_retriever = HybridRetriever()
         self.web_search = WebSearchTool()
     
     async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,7 +88,7 @@ class ResearcherAgent(BaseAgent):
         }
     
     async def _execute_internal_search_task(self, task: Dict[str, Any]) -> ResearchResult:
-        """Execute an internal document search task."""
+        """Execute an internal document search task using hybrid retrieval."""
         import time
         start_time = time.time()
         
@@ -96,12 +98,27 @@ class ResearcherAgent(BaseAgent):
         
         logger.info(f"Executing internal search task {task_id}: {query}")
         
-        # Search internal documents
-        search_results = self.document_store.search_documents(
+        # Use hybrid retrieval (RAG + Knowledge Graph)
+        hybrid_results = await self.hybrid_retriever.search(
             query=query,
             n_results=20,
-            file_types=file_types if file_types else None
+            include_graph=True,
+            include_rag=True,
+            entity_boost=1.5
         )
+        
+        # Convert hybrid results to standard format
+        search_results = []
+        for result in hybrid_results:
+            search_result = {
+                "content": result.content,
+                "metadata": result.metadata,
+                "distance": 1.0 - result.relevance_score,  # Convert relevance to distance
+                "source_type": result.source_type,
+                "entities": result.entities or [],
+                "relationships": result.relationships or []
+            }
+            search_results.append(search_result)
         
         # Generate summary of findings
         summary = await self._summarize_internal_results(query, search_results)
@@ -114,7 +131,7 @@ class ResearcherAgent(BaseAgent):
         return ResearchResult(
             task_id=task_id,
             query=query,
-            source_type="internal",
+            source_type="hybrid",
             results=search_results,
             summary=summary,
             confidence=confidence,
@@ -172,34 +189,62 @@ class ResearcherAgent(BaseAgent):
             return {"success": False, "error": str(e)}
     
     async def _summarize_internal_results(self, query: str, results: List[Dict[str, Any]]) -> str:
-        """Generate a summary of internal search results."""
+        """Generate a summary of internal search results with knowledge graph insights."""
         if not results:
             return "No relevant internal documents found."
         
         # Prepare content for summarization
         content_snippets = []
+        entities_found = set()
+        relationships_found = []
+        
         for result in results[:10]:  # Limit to top 10 results
             content = result.get('content', '')[:500]  # Limit content length
             file_path = result.get('metadata', {}).get('file_path', 'Unknown')
-            content_snippets.append(f"From {file_path}: {content}")
+            source_type = result.get('source_type', 'rag')
+            
+            # Collect entities and relationships
+            if result.get('entities'):
+                for entity in result['entities']:
+                    entities_found.add(f"{entity.get('text', '')} ({entity.get('label', '')})")
+            
+            if result.get('relationships'):
+                for rel in result['relationships']:
+                    relationships_found.append(f"{rel.get('source', '')} → {rel.get('type', '')} → {rel.get('target', '')}")
+            
+            content_snippets.append(f"From {file_path} [{source_type}]: {content}")
         
         combined_content = "\n\n".join(content_snippets)
         
+        # Add knowledge graph insights
+        kg_insights = ""
+        if entities_found:
+            kg_insights += f"\n\nKey Entities Found: {', '.join(list(entities_found)[:10])}"
+        
+        if relationships_found:
+            kg_insights += f"\n\nKey Relationships: {'; '.join(relationships_found[:5])}"
+        
         prompt = f"""
-        Summarize the following internal document search results for the query: "{query}"
+        Summarize the following hybrid search results (RAG + Knowledge Graph) for the query: "{query}"
         
         Search Results:
         {combined_content}
+        {kg_insights}
         
-        Please provide a concise summary highlighting the key findings and their relevance to the query.
-        Include specific document references where appropriate.
+        Please provide a concise summary highlighting:
+        1. Key findings and their relevance to the query
+        2. Important entities and relationships discovered
+        3. Connections between different documents
+        4. Specific document references where appropriate
+        
+        Focus on insights that emerge from the knowledge graph connections.
         """
         
         try:
             summary = await self.call_llm([
-                {"role": "system", "content": "You are a research assistant summarizing document search results."},
+                {"role": "system", "content": "You are a research assistant with expertise in analyzing both document content and knowledge graph relationships."},
                 {"role": "user", "content": prompt}
-            ], max_tokens=1000)
+            ], max_tokens=1200)
             return summary
         except Exception as e:
             logger.error(f"Error generating internal summary: {e}")
@@ -249,6 +294,7 @@ class ResearcherAgent(BaseAgent):
         # - Number of results
         # - Average relevance score (if available)
         # - Content quality indicators
+        # - Knowledge graph enhancement
         
         base_confidence = min(len(results) / 10.0, 1.0)  # More results = higher confidence, capped at 1.0
         
@@ -258,4 +304,33 @@ class ResearcherAgent(BaseAgent):
             relevance_factor = max(0.0, 1.0 - avg_distance)  # Lower distance = higher relevance
             base_confidence *= relevance_factor
         
-        return round(base_confidence, 2)
+        # Boost confidence for hybrid results with knowledge graph data
+        kg_boost = 0.0
+        for result in results:
+            if result.get('source_type') == 'hybrid' or result.get('source_type') == 'graph':
+                kg_boost += 0.1
+            if result.get('entities'):
+                kg_boost += 0.05
+            if result.get('relationships'):
+                kg_boost += 0.05
+        
+        final_confidence = min(base_confidence + kg_boost, 1.0)
+        return round(final_confidence, 2)
+    
+    async def get_related_queries(self, query: str) -> List[str]:
+        """Get related query suggestions based on knowledge graph."""
+        try:
+            suggestions = await self.hybrid_retriever.suggest_related_queries(query, limit=5)
+            return suggestions
+        except Exception as e:
+            logger.error(f"Error getting related queries: {e}")
+            return []
+    
+    async def get_entity_expansion(self, entity_text: str) -> Dict[str, Any]:
+        """Get expanded information about an entity from the knowledge graph."""
+        try:
+            expansion = await self.hybrid_retriever.get_entity_expansion(entity_text, max_depth=2)
+            return expansion
+        except Exception as e:
+            logger.error(f"Error getting entity expansion: {e}")
+            return {}

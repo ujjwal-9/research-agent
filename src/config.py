@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     chroma_persist_directory: str = Field("./data/chroma_db", env="CHROMA_PERSIST_DIRECTORY")
     embedding_model: str = Field("text-embedding-3-small", env="EMBEDDING_MODEL")
     
+    # Knowledge Graph Configuration
+    neo4j_uri: str = Field("neo4j://127.0.0.1:7687", env="NEO4J_URI")
+    neo4j_username: str = Field("neo4j", env="NEO4J_USERNAME")
+    neo4j_password: str = Field("password", env="NEO4J_PASSWORD")
+    neo4j_database: str = Field("neo4j", env="NEO4J_DATABASE")
+    
+    # Entity Extraction Configuration
+    spacy_model: str = Field("en_core_web_sm", env="SPACY_MODEL")
+    min_entity_confidence: float = Field(0.7, env="MIN_ENTITY_CONFIDENCE")
+    max_entities_per_chunk: int = Field(20, env="MAX_ENTITIES_PER_CHUNK")
+    
     # Document Processing Configuration
     document_chunk_size: int = Field(1000, env="DOCUMENT_CHUNK_SIZE")
     document_chunk_overlap: int = Field(200, env="DOCUMENT_CHUNK_OVERLAP")

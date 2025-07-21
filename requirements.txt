@@ -19,6 +19,11 @@ pytesseract>=0.3.10
 # Vector database and search
 chromadb>=0.4.0
 
+# Knowledge Graph
+neo4j>=5.0.0
+spacy>=3.7.0
+networkx>=3.0
+
 # Web search and scraping
 requests>=2.31.0
 beautifulsoup4>=4.12.0
