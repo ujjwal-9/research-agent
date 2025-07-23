@@ -4,56 +4,103 @@ import os
 from typing import List, Dict, Any, Optional
 from dataclasses import asdict
 import json
+import uuid
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from qdrant_client.http.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    Filter,
+    FieldCondition,
+    MatchValue,
+)
 from openai import OpenAI
 from loguru import logger
 
 from src.config import settings
 from src.ingestion.document_processor import ProcessedDocument
 from src.knowledge_graph.entity_extractor import EntityExtractor
+from src.knowledge_graph.llm_entity_extractor import HybridEntityExtractor
 from src.knowledge_graph.graph_store import KnowledgeGraphStore
 
 
 class DocumentStore:
-    """Manages document storage and retrieval using ChromaDB."""
+    """Manages document storage and retrieval using Qdrant."""
 
     def __init__(self, enable_knowledge_graph: bool = True):
-        self.client = chromadb.PersistentClient(
-            path=settings.chroma_persist_directory,
-            settings=ChromaSettings(anonymized_telemetry=False),
+        # Initialize Qdrant client to connect to Docker server
+        self.client = QdrantClient(
+            host=settings.qdrant_host,
+            port=settings.qdrant_port,
         )
 
-        self.collection = self.client.get_or_create_collection(
-            name="documents", metadata={"hnsw:space": "cosine"}
-        )
+        self.collection_name = settings.qdrant_collection_name
+
+        # Ensure collection exists
+        self._ensure_collection_exists()
 
         # Initialize OpenAI client for embeddings
         self.openai_client = OpenAI(api_key=settings.openai_api_key)
         self.embedding_model = settings.embedding_model
-        
+
         # Initialize knowledge graph components
         self.enable_kg = enable_knowledge_graph
         if self.enable_kg:
             try:
-                self.entity_extractor = EntityExtractor()
+                # Use hybrid extractor that combines spaCy and LLM
+                if settings.use_llm_extraction:
+                    self.entity_extractor = HybridEntityExtractor()
+                    logger.info(
+                        "Knowledge graph integration enabled with LLM-enhanced extraction"
+                    )
+                else:
+                    self.entity_extractor = EntityExtractor()
+                    logger.info(
+                        "Knowledge graph integration enabled with spaCy extraction"
+                    )
+
                 self.graph_store = KnowledgeGraphStore()
-                logger.info("Knowledge graph integration enabled")
             except Exception as e:
                 logger.warning(f"Failed to initialize knowledge graph: {e}")
                 self.enable_kg = False
-        
+
         logger.info(
             f"Initialized document store with {self.get_document_count()} documents"
         )
-    
+
+    def _ensure_collection_exists(self):
+        """Ensure the collection exists, create if it doesn't."""
+        try:
+            collections = self.client.get_collections()
+            collection_names = [
+                collection.name for collection in collections.collections
+            ]
+
+            if self.collection_name not in collection_names:
+                # Create collection with vector configuration
+                self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(
+                        size=1536,  # OpenAI embedding size for text-embedding-3-small
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info(f"Created Qdrant collection: {self.collection_name}")
+            else:
+                logger.info(f"Using existing Qdrant collection: {self.collection_name}")
+
+        except Exception as e:
+            logger.error(f"Error ensuring collection exists: {e}")
+            raise
+
     def close(self):
         """Close the OpenAI client connection."""
-        if hasattr(self.openai_client, 'close'):
+        if hasattr(self.openai_client, "close"):
             self.openai_client.close()
-        
-        if self.enable_kg and hasattr(self, 'graph_store'):
+
+        if self.enable_kg and hasattr(self, "graph_store"):
             self.graph_store.close()
 
     async def store_document(self, document: ProcessedDocument) -> bool:
@@ -83,17 +130,26 @@ class DocumentStore:
                 # Generate embeddings using OpenAI
                 embeddings = self._generate_embeddings(chunk_texts)
 
-                # Store in ChromaDB
-                self.collection.add(
-                    ids=chunk_ids,
-                    documents=chunk_texts,
-                    metadatas=chunk_metadatas,
-                    embeddings=embeddings,
-                )
+                # Create points for Qdrant
+                points = []
+                for chunk_id, text, metadata, embedding in zip(
+                    chunk_ids, chunk_texts, chunk_metadatas, embeddings
+                ):
+                    point = PointStruct(
+                        id=str(uuid.uuid4()),  # Generate unique UUID for Qdrant
+                        vector=embedding,
+                        payload={"chunk_id": chunk_id, "content": text, **metadata},
+                    )
+                    points.append(point)
+
+                # Store in Qdrant
+                self.client.upsert(collection_name=self.collection_name, points=points)
 
                 # Extract entities and relationships for knowledge graph
                 if self.enable_kg:
-                    await self._process_knowledge_graph(document, chunk_texts, chunk_ids)
+                    await self._process_knowledge_graph(
+                        document, chunk_texts, chunk_ids
+                    )
 
                 logger.info(
                     f"Stored document {document.file_path} with {len(chunk_texts)} chunks"
@@ -107,25 +163,70 @@ class DocumentStore:
             logger.error(f"Error storing document {document.file_path}: {e}")
             return False
 
-    async def _process_knowledge_graph(self, document: ProcessedDocument, chunk_texts: List[str], chunk_ids: List[str]):
+    async def _process_knowledge_graph(
+        self, document: ProcessedDocument, chunk_texts: List[str], chunk_ids: List[str]
+    ):
         """Process document chunks for knowledge graph extraction."""
         try:
+            # Determine domain context from document metadata
+            domain_context = self._get_domain_context(document)
+
             for i, (chunk_text, chunk_id) in enumerate(zip(chunk_texts, chunk_ids)):
                 # Extract entities and relationships from chunk
-                entities, relationships = await self.entity_extractor.extract_entities_and_relationships(
-                    chunk_text, chunk_id
-                )
-                
+                if isinstance(self.entity_extractor, HybridEntityExtractor):
+                    # Use hybrid extraction with LLM
+                    entities, relationships = (
+                        await self.entity_extractor.extract_entities_and_relationships(
+                            chunk_text,
+                            chunk_id,
+                            use_llm=settings.use_llm_extraction,
+                            domain_context=domain_context,
+                        )
+                    )
+                else:
+                    # Use traditional spaCy extraction
+                    entities, relationships = (
+                        await self.entity_extractor.extract_entities_and_relationships(
+                            chunk_text, chunk_id
+                        )
+                    )
+
                 # Store in knowledge graph
                 if entities or relationships:
                     await self.graph_store.store_entities_and_relationships(
                         entities, relationships, document.file_path, str(i)
                     )
-                    
-            logger.debug(f"Processed knowledge graph for {document.file_path}")
-            
+
+            logger.debug(
+                f"Processed knowledge graph for {document.file_path} with {len(chunk_texts)} chunks"
+            )
+
         except Exception as e:
-            logger.warning(f"Knowledge graph processing failed for {document.file_path}: {e}")
+            logger.warning(
+                f"Knowledge graph processing failed for {document.file_path}: {e}"
+            )
+
+    def _get_domain_context(self, document: ProcessedDocument) -> str:
+        """Extract domain context from document for better LLM extraction."""
+        context_parts = []
+
+        # Add file type context
+        if document.file_type:
+            context_parts.append(f"Document type: {document.file_type}")
+
+        # Add title context
+        if document.title and document.title != document.file_path:
+            context_parts.append(f"Title: {document.title}")
+
+        # Add metadata context
+        if document.metadata:
+            if "author" in document.metadata and document.metadata["author"]:
+                context_parts.append(f"Author: {document.metadata['author']}")
+
+            if "subject" in document.metadata and document.metadata["subject"]:
+                context_parts.append(f"Subject: {document.metadata['subject']}")
+
+        return "; ".join(context_parts) if context_parts else None
 
     def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings using OpenAI API."""
@@ -173,33 +274,41 @@ class DocumentStore:
     ) -> List[Dict[str, Any]]:
         """Search for relevant document chunks."""
         try:
-            # Build where clause for filtering
-            where_clause = {}
-            if file_types:
-                where_clause["file_type"] = {"$in": file_types}
-
             # Generate query embedding
             query_embedding = self._generate_embeddings([query])[0]
 
+            # Build filter for file types
+            search_filter = None
+            if file_types:
+                search_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="file_type", match=MatchValue(any=file_types)
+                        )
+                    ]
+                )
+
             # Perform similarity search
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=where_clause if where_clause else None,
+            search_results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                limit=n_results,
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False,
             )
 
             # Format results
             formatted_results = []
-            if results["documents"] and results["documents"][0]:
-                for i in range(len(results["documents"][0])):
-                    result = {
-                        "content": results["documents"][0][i],
-                        "metadata": results["metadatas"][0][i],
-                        "distance": (
-                            results["distances"][0][i] if results["distances"] else None
-                        ),
-                    }
-                    formatted_results.append(result)
+            for result in search_results:
+                formatted_result = {
+                    "content": result.payload.get("content", ""),
+                    "metadata": {
+                        k: v for k, v in result.payload.items() if k != "content"
+                    },
+                    "distance": 1.0 - result.score,  # Convert similarity to distance
+                }
+                formatted_results.append(formatted_result)
 
             logger.info(
                 f"Found {len(formatted_results)} results for query: {query[:50]}..."
@@ -213,16 +322,30 @@ class DocumentStore:
     def get_document_by_path(self, file_path: str) -> List[Dict[str, Any]]:
         """Retrieve all chunks for a specific document."""
         try:
-            results = self.collection.get(where={"file_path": file_path})
+            search_filter = Filter(
+                must=[
+                    FieldCondition(key="file_path", match=MatchValue(value=file_path))
+                ]
+            )
+
+            # Scroll through all matching points
+            results, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=search_filter,
+                with_payload=True,
+                with_vectors=False,
+                limit=10000,  # Large limit to get all chunks
+            )
 
             formatted_results = []
-            if results["documents"]:
-                for i in range(len(results["documents"])):
-                    result = {
-                        "content": results["documents"][i],
-                        "metadata": results["metadatas"][i],
-                    }
-                    formatted_results.append(result)
+            for result in results:
+                formatted_result = {
+                    "content": result.payload.get("content", ""),
+                    "metadata": {
+                        k: v for k, v in result.payload.items() if k != "content"
+                    },
+                }
+                formatted_results.append(formatted_result)
 
             # Sort by chunk index
             formatted_results.sort(key=lambda x: x["metadata"].get("chunk_index", 0))
@@ -235,7 +358,8 @@ class DocumentStore:
     def get_document_count(self) -> int:
         """Get total number of document chunks stored."""
         try:
-            return self.collection.count()
+            info = self.client.get_collection(self.collection_name)
+            return info.points_count
         except Exception as e:
             logger.error(f"Error getting document count: {e}")
             return 0
@@ -243,21 +367,26 @@ class DocumentStore:
     def get_unique_documents(self) -> List[Dict[str, Any]]:
         """Get list of unique documents with metadata."""
         try:
-            # Get all documents
-            results = self.collection.get()
+            # Scroll through all points to collect unique documents
+            points, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                with_payload=True,
+                with_vectors=False,
+                limit=10000,  # Large limit to get all documents
+            )
 
             # Group by file path
             unique_docs = {}
-            if results["metadatas"]:
-                for metadata in results["metadatas"]:
-                    file_path = metadata["file_path"]
-                    if file_path not in unique_docs:
-                        unique_docs[file_path] = {
-                            "file_path": file_path,
-                            "title": metadata.get("title", ""),
-                            "file_type": metadata.get("file_type", ""),
-                            "total_chunks": metadata.get("total_chunks", 0),
-                        }
+            for point in points:
+                payload = point.payload
+                file_path = payload.get("file_path")
+                if file_path and file_path not in unique_docs:
+                    unique_docs[file_path] = {
+                        "file_path": file_path,
+                        "title": payload.get("title", ""),
+                        "file_type": payload.get("file_type", ""),
+                        "total_chunks": payload.get("total_chunks", 0),
+                    }
 
             return list(unique_docs.values())
 
@@ -268,14 +397,28 @@ class DocumentStore:
     def delete_document(self, file_path: str) -> bool:
         """Delete all chunks for a specific document."""
         try:
-            # Get all chunk IDs for this document
-            results = self.collection.get(where={"file_path": file_path})
+            search_filter = Filter(
+                must=[
+                    FieldCondition(key="file_path", match=MatchValue(value=file_path))
+                ]
+            )
 
-            if results["ids"]:
-                self.collection.delete(ids=results["ids"])
-                logger.info(
-                    f"Deleted document {file_path} ({len(results['ids'])} chunks)"
+            # Get all points for this document
+            points, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=search_filter,
+                with_payload=False,
+                with_vectors=False,
+                limit=10000,
+            )
+
+            if points:
+                point_ids = [point.id for point in points]
+                self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=models.PointIdsList(points=point_ids),
                 )
+                logger.info(f"Deleted document {file_path} ({len(point_ids)} chunks)")
                 return True
             else:
                 logger.warning(f"Document {file_path} not found")
@@ -288,10 +431,9 @@ class DocumentStore:
     def clear_all_documents(self) -> bool:
         """Clear all documents from the store."""
         try:
-            self.client.delete_collection("documents")
-            self.collection = self.client.get_or_create_collection(
-                name="documents", metadata={"hnsw:space": "cosine"}
-            )
+            # Delete and recreate collection
+            self.client.delete_collection(self.collection_name)
+            self._ensure_collection_exists()
             logger.info("Cleared all documents from store")
             return True
         except Exception as e:

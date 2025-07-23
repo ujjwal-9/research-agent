@@ -1,7 +1,8 @@
 .env
 .venv
 data
-chroma_db
+qdrant_storage
+*.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

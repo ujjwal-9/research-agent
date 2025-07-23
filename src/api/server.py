@@ -11,7 +11,9 @@ from src.agents.research_orchestrator import ResearchOrchestrator
 from src.tools.function_calls import FunctionCallManager
 from src.ingestion.document_store import DocumentStore
 from src.knowledge_graph.hybrid_retriever import HybridRetriever
+from src.knowledge_graph.llm_entity_extractor import extract_with_llm
 from src.knowledge_graph.graph_store import KnowledgeGraphStore
+from src.knowledge_graph.llm_entity_extractor import extract_with_llm
 
 
 # Pydantic models for API
@@ -329,6 +331,168 @@ def create_app() -> FastAPI:
             }
         except Exception as e:
             logger.error(f"Entity search by type failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/extract/entities")
+    async def extract_entities_llm(request: dict):
+        """Extract entities and relationships from text using LLM."""
+        try:
+            text = request.get("text", "")
+            domain_context = request.get("domain_context")
+            use_hybrid = request.get("use_hybrid", True)
+            
+            if not text.strip():
+                raise HTTPException(status_code=400, detail="Text is required")
+            
+            entities, relationships = await extract_with_llm(
+                text=text,
+                domain_context=domain_context,
+                use_hybrid=use_hybrid
+            )
+            
+            # Convert to serializable format
+            entities_data = [
+                {
+                    "text": e.text,
+                    "label": e.label,
+                    "confidence": e.confidence,
+                    "normalized_text": e.normalized_text
+                } for e in entities
+            ]
+            
+            relationships_data = [
+                {
+                    "source_entity": r.source_entity.text,
+                    "target_entity": r.target_entity.text,
+                    "relation_type": r.relation_type,
+                    "confidence": r.confidence,
+                    "context": r.context
+                } for r in relationships
+            ]
+            
+            return {
+                "success": True,
+                "extraction_method": "hybrid" if use_hybrid else "llm_only",
+                "entities": entities_data,
+                "relationships": relationships_data,
+                "total_entities": len(entities_data),
+                "total_relationships": len(relationships_data)
+            }
+            
+        except Exception as e:
+            logger.error(f"LLM entity extraction failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # LLM Entity Extraction Endpoints
+    @app.post("/extract/entities")
+    async def extract_entities_endpoint(request: dict):
+        """Extract entities and relationships from text using LLM."""
+        try:
+            text = request.get("text", "")
+            domain_context = request.get("domain_context")
+            use_hybrid = request.get("use_hybrid", True)
+            
+            if not text:
+                raise HTTPException(status_code=400, detail="Text is required")
+            
+            entities, relationships = await extract_with_llm(
+                text=text,
+                domain_context=domain_context,
+                use_hybrid=use_hybrid
+            )
+            
+            return {
+                "success": True,
+                "entities": [
+                    {
+                        "text": e.text,
+                        "label": e.label,
+                        "confidence": e.confidence,
+                        "normalized": e.normalized_text
+                    } for e in entities
+                ],
+                "relationships": [
+                    {
+                        "source": r.source_entity.text,
+                        "target": r.target_entity.text,
+                        "type": r.relation_type,
+                        "confidence": r.confidence,
+                        "context": r.context
+                    } for r in relationships
+                ],
+                "extraction_method": "hybrid" if use_hybrid else "llm_only",
+                "total_entities": len(entities),
+                "total_relationships": len(relationships)
+            }
+            
+        except Exception as e:
+            logger.error(f"Entity extraction failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/extract/batch")
+    async def batch_extract_entities(request: dict):
+        """Extract entities from multiple texts in batch."""
+        try:
+            texts = request.get("texts", [])
+            domain_context = request.get("domain_context")
+            use_hybrid = request.get("use_hybrid", True)
+            
+            if not texts or not isinstance(texts, list):
+                raise HTTPException(status_code=400, detail="Texts array is required")
+            
+            results = []
+            for i, text in enumerate(texts):
+                try:
+                    entities, relationships = await extract_with_llm(
+                        text=text,
+                        domain_context=domain_context,
+                        use_hybrid=use_hybrid
+                    )
+                    
+                    results.append({
+                        "index": i,
+                        "success": True,
+                        "entities": [
+                            {
+                                "text": e.text,
+                                "label": e.label,
+                                "confidence": e.confidence,
+                                "normalized": e.normalized_text
+                            } for e in entities
+                        ],
+                        "relationships": [
+                            {
+                                "source": r.source_entity.text,
+                                "target": r.target_entity.text,
+                                "type": r.relation_type,
+                                "confidence": r.confidence,
+                                "context": r.context
+                            } for r in relationships
+                        ],
+                        "total_entities": len(entities),
+                        "total_relationships": len(relationships)
+                    })
+                    
+                except Exception as e:
+                    results.append({
+                        "index": i,
+                        "success": False,
+                        "error": str(e)
+                    })
+            
+            successful = sum(1 for r in results if r.get("success"))
+            
+            return {
+                "success": True,
+                "results": results,
+                "total_processed": len(texts),
+                "successful": successful,
+                "failed": len(texts) - successful,
+                "extraction_method": "hybrid" if use_hybrid else "llm_only"
+            }
+            
+        except Exception as e:
+            logger.error(f"Batch entity extraction failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
     
     return app

@@ -135,6 +135,46 @@ async def test_hybrid_retrieval():
         logger.error(f"Hybrid retrieval test failed: {e}")
         return False
 
+async def test_llm_extraction():
+    """Test LLM-based entity extraction."""
+    try:
+        from src.knowledge_graph.llm_entity_extractor import extract_with_llm
+        
+        logger.info("Testing LLM entity extraction...")
+        
+        # Sample text for testing
+        test_text = """
+        Apple Inc. is a technology company founded by Steve Jobs and Steve Wozniak in 1976. 
+        The company is headquartered in Cupertino, California and is known for products like 
+        the iPhone and MacBook. Tim Cook currently serves as CEO.
+        """
+        
+        # Test LLM extraction
+        entities, relationships = await extract_with_llm(
+            text=test_text,
+            domain_context="Technology and business",
+            use_hybrid=True
+        )
+        
+        logger.info(f"LLM extraction test successful - found {len(entities)} entities and {len(relationships)} relationships")
+        
+        if entities:
+            logger.info("Sample entities:")
+            for entity in entities[:3]:
+                logger.info(f"  - {entity.text} ({entity.label})")
+        
+        if relationships:
+            logger.info("Sample relationships:")
+            for rel in relationships[:2]:
+                logger.info(f"  - {rel.source_entity.text} → {rel.relation_type} → {rel.target_entity.text}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"LLM extraction test failed: {e}")
+        logger.error("Please ensure OpenAI API key is configured in .env file")
+        return False
+
 def main():
     """Main setup function."""
     logger.info("Setting up Knowledge Graph + RAG system...")
@@ -162,6 +202,10 @@ def main():
     
     # Step 4: Test hybrid retrieval
     if not asyncio.run(test_hybrid_retrieval()):
+        success = False
+    
+    # Step 5: Test LLM extraction
+    if not asyncio.run(test_llm_extraction()):
         success = False
     
     if success:
