@@ -15,6 +15,7 @@ from qdrant_client.http.models import (
     Filter,
     FieldCondition,
     MatchValue,
+    MatchAny,
 )
 from openai import OpenAI
 from loguru import logger
@@ -282,9 +283,7 @@ class DocumentStore:
             if file_types:
                 search_filter = Filter(
                     must=[
-                        FieldCondition(
-                            key="file_type", match=MatchValue(any=file_types)
-                        )
+                        FieldCondition(key="file_type", match=MatchAny(any=file_types))
                     ]
                 )
 
@@ -439,3 +438,154 @@ class DocumentStore:
         except Exception as e:
             logger.error(f"Error clearing documents: {e}")
             return False
+
+    def get_documents_by_file_type(self, file_type: str) -> List[Dict[str, Any]]:
+        """Get all documents of a specific file type."""
+        try:
+            search_filter = Filter(
+                must=[
+                    FieldCondition(key="file_type", match=MatchValue(value=file_type))
+                ]
+            )
+
+            # Scroll through all matching points
+            points, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=search_filter,
+                with_payload=True,
+                with_vectors=False,
+                limit=10000,  # Large limit to get all chunks
+            )
+
+            # Group by file path to get unique documents
+            unique_docs = {}
+            for point in points:
+                payload = point.payload
+                file_path = payload.get("file_path")
+                if file_path and file_path not in unique_docs:
+                    unique_docs[file_path] = {
+                        "file_path": file_path,
+                        "title": payload.get("title", ""),
+                        "file_type": payload.get("file_type", ""),
+                        "total_chunks": payload.get("total_chunks", 0),
+                        "point_id": point.id,  # Keep track for potential deletion
+                    }
+
+            result = list(unique_docs.values())
+            logger.info(
+                f"Found {len(result)} unique documents with file type: {file_type}"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting documents by file type {file_type}: {e}")
+            return []
+
+    def delete_documents_by_file_type(self, file_type: str) -> Dict[str, Any]:
+        """Delete all documents of a specific file type from the vector database."""
+        try:
+            deletion_stats = {"documents_deleted": 0, "chunks_deleted": 0, "errors": []}
+
+            search_filter = Filter(
+                must=[
+                    FieldCondition(key="file_type", match=MatchValue(value=file_type))
+                ]
+            )
+
+            # Get all points for documents of this file type
+            points, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=search_filter,
+                with_payload=True,
+                with_vectors=False,
+                limit=10000,
+            )
+
+            if points:
+                # Group by file path to count unique documents
+                unique_file_paths = set()
+                point_ids = []
+
+                for point in points:
+                    point_ids.append(point.id)
+                    file_path = point.payload.get("file_path")
+                    if file_path:
+                        unique_file_paths.add(file_path)
+
+                # Delete all points
+                self.client.delete(
+                    collection_name=self.collection_name,
+                    points_selector=models.PointIdsList(points=point_ids),
+                )
+
+                deletion_stats["documents_deleted"] = len(unique_file_paths)
+                deletion_stats["chunks_deleted"] = len(point_ids)
+
+                logger.info(
+                    f"Deleted {len(unique_file_paths)} documents ({len(point_ids)} chunks) with file type: {file_type}"
+                )
+
+            else:
+                logger.info(f"No documents found with file type: {file_type}")
+
+            return deletion_stats
+
+        except Exception as e:
+            error_msg = f"Error deleting documents by file type {file_type}: {e}"
+            logger.error(error_msg)
+            return {"documents_deleted": 0, "chunks_deleted": 0, "errors": [error_msg]}
+
+    def delete_documents_by_paths(self, file_paths: List[str]) -> Dict[str, Any]:
+        """Delete multiple documents by their file paths from the vector database."""
+        try:
+            deletion_stats = {"documents_deleted": 0, "chunks_deleted": 0, "errors": []}
+
+            for file_path in file_paths:
+                try:
+                    search_filter = Filter(
+                        must=[
+                            FieldCondition(
+                                key="file_path", match=MatchValue(value=file_path)
+                            )
+                        ]
+                    )
+
+                    # Get all points for this document
+                    points, _ = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=search_filter,
+                        with_payload=False,
+                        with_vectors=False,
+                        limit=10000,
+                    )
+
+                    if points:
+                        point_ids = [point.id for point in points]
+                        self.client.delete(
+                            collection_name=self.collection_name,
+                            points_selector=models.PointIdsList(points=point_ids),
+                        )
+
+                        deletion_stats["documents_deleted"] += 1
+                        deletion_stats["chunks_deleted"] += len(point_ids)
+
+                        logger.debug(
+                            f"Deleted document {file_path} ({len(point_ids)} chunks)"
+                        )
+                    else:
+                        logger.warning(
+                            f"Document {file_path} not found in vector database"
+                        )
+
+                except Exception as e:
+                    error_msg = f"Error deleting {file_path} from vector database: {e}"
+                    logger.error(error_msg)
+                    deletion_stats["errors"].append(error_msg)
+
+            logger.info(f"Vector database deletion completed: {deletion_stats}")
+            return deletion_stats
+
+        except Exception as e:
+            error_msg = f"Error in bulk document deletion: {e}"
+            logger.error(error_msg)
+            return {"documents_deleted": 0, "chunks_deleted": 0, "errors": [error_msg]}
