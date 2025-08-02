@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from .excel_converter import ExcelToHTMLConverter
 from .knowledge_extractor import KnowledgeExtractor
@@ -50,6 +52,16 @@ class ExcelProcessor:
             HeaderDetector(api_key=self.openai_api_key) if self.openai_api_key else None
         )
 
+        # Get parallelization setting
+        try:
+            self.parallel_sheets = int(os.getenv("PARALLEL_SHEETS", "3"))
+        except ValueError:
+            self.parallel_sheets = 3
+            logger.warning("Invalid PARALLEL_SHEETS value, using default: 3")
+
+        # Thread lock for thread-safe logging and API calls
+        self.thread_lock = threading.Lock()
+
         # Set up logging
         self._setup_logging()
 
@@ -57,6 +69,10 @@ class ExcelProcessor:
             logger.warning(
                 "OpenAI API key not provided. Knowledge extraction will use fallback method."
             )
+
+        logger.info(
+            f"Parallel processing enabled: {self.parallel_sheets} sheets at a time"
+        )
 
     def _setup_logging(self):
         """Set up logging for the processor."""
@@ -102,12 +118,10 @@ class ExcelProcessor:
                 "errors": [],
             }
 
-            # Step 1: Convert Excel to HTML
-            logger.info("Step 1: Converting Excel to HTML")
+            # Step 1: Convert Excel to HTML (parallelized)
+            logger.info("Step 1: Converting Excel to HTML (parallel processing)")
             try:
-                html_files = self.excel_converter.convert_excel_to_html(
-                    excel_path, output_folder
-                )
+                html_files = self._convert_excel_parallel(excel_path, output_folder)
                 results["html_files"] = html_files
                 logger.info(f"Successfully converted {len(html_files)} sheets to HTML")
             except Exception as e:
@@ -116,27 +130,15 @@ class ExcelProcessor:
                 results["errors"].append(error_msg)
                 return results
 
-            # Step 2: Extract knowledge from HTML files
-            logger.info("Step 2: Extracting knowledge using OpenAI")
+            # Step 2: Extract knowledge from HTML files (parallelized)
+            logger.info(
+                "Step 2: Extracting knowledge using OpenAI (parallel processing)"
+            )
             try:
                 if self.knowledge_extractor:
-                    knowledge_files = {}
-                    for sheet_name, html_path in html_files.items():
-                        try:
-                            html_file_path = Path(html_path)
-                            knowledge_path = (
-                                self.knowledge_extractor.extract_knowledge_from_file(
-                                    html_file_path, output_folder, 0
-                                )
-                            )
-                            knowledge_files[sheet_name] = str(knowledge_path)
-                            # Add delay between API calls
-                            time.sleep(0.5)
-                        except Exception as e:
-                            error_msg = f"Error extracting knowledge from {sheet_name}: {str(e)}"
-                            logger.error(error_msg)
-                            results["errors"].append(error_msg)
-
+                    knowledge_files = self._extract_knowledge_parallel(
+                        html_files, output_folder
+                    )
                     results["knowledge_files"] = knowledge_files
                     logger.info(
                         f"Successfully extracted knowledge from {len(knowledge_files)} sheets"
@@ -150,24 +152,14 @@ class ExcelProcessor:
                 logger.error(error_msg)
                 results["errors"].append(error_msg)
 
-            # Step 3: Extract tables and save as separate HTML files
-            logger.info("Step 3: Extracting tables as separate HTML files")
+            # Step 3: Extract tables and save as separate HTML files (parallelized)
+            logger.info(
+                "Step 3: Extracting tables as separate HTML files (parallel processing)"
+            )
             try:
-                all_table_files = []
-                for sheet_name, html_path in html_files.items():
-                    try:
-                        html_file_path = Path(html_path)
-                        table_files = self.table_extractor.extract_tables_from_file(
-                            html_file_path, output_folder, excel_path.name
-                        )
-                        all_table_files.extend([str(path) for path in table_files])
-                    except Exception as e:
-                        error_msg = (
-                            f"Error extracting tables from {sheet_name}: {str(e)}"
-                        )
-                        logger.error(error_msg)
-                        results["errors"].append(error_msg)
-
+                all_table_files = self._extract_tables_parallel(
+                    html_files, output_folder, excel_path.name
+                )
                 results["table_files"] = all_table_files
                 logger.info(f"Successfully extracted {len(all_table_files)} tables")
             except Exception as e:
@@ -369,6 +361,216 @@ class ExcelProcessor:
             logger.info(f"Processing report saved to: {output_path}")
 
         return report
+
+    def _convert_excel_parallel(
+        self, excel_path: Path, output_folder: Path
+    ) -> Dict[str, str]:
+        """
+        Convert Excel sheets to HTML in parallel.
+
+        Args:
+            excel_path: Path to Excel file
+            output_folder: Output directory
+
+        Returns:
+            Dictionary mapping sheet names to HTML file paths
+        """
+        import pandas as pd
+
+        try:
+            # Read all sheet names first
+            excel_file = pd.ExcelFile(excel_path)
+            sheet_names = excel_file.sheet_names
+
+            logger.info(
+                f"Processing {len(sheet_names)} sheets in parallel (max {self.parallel_sheets} at a time)"
+            )
+
+            html_files = {}
+
+            def process_single_sheet(sheet_name):
+                """Process a single sheet."""
+                try:
+                    with self.thread_lock:
+                        logger.info(f"Processing sheet: {sheet_name}")
+
+                    # Read the sheet without assuming headers
+                    df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
+
+                    # Use header detector to properly set headers if available
+                    if self.excel_converter.header_detector and not df.empty:
+                        try:
+                            df = self.excel_converter.header_detector.process_dataframe_with_detected_headers(
+                                df, sheet_name
+                            )
+                        except Exception as e:
+                            with self.thread_lock:
+                                logger.warning(
+                                    f"Header detection failed for sheet {sheet_name}: {str(e)}, using original data"
+                                )
+
+                    # Convert to HTML
+                    html_content = self.excel_converter._dataframe_to_html(
+                        df, sheet_name
+                    )
+
+                    # Create output file path
+                    safe_sheet_name = self.excel_converter._sanitize_filename(
+                        sheet_name
+                    )
+                    html_filename = f"{excel_path.stem}_{safe_sheet_name}.html"
+                    html_path = output_folder / html_filename
+
+                    # Ensure output directory exists
+                    html_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Write HTML file
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+
+                    with self.thread_lock:
+                        logger.info(
+                            f"Saved HTML for sheet '{sheet_name}' to: {html_path}"
+                        )
+
+                    return sheet_name, str(html_path)
+
+                except Exception as e:
+                    with self.thread_lock:
+                        logger.error(f"Error processing sheet {sheet_name}: {str(e)}")
+                    return sheet_name, None
+
+            # Process sheets in parallel
+            with ThreadPoolExecutor(max_workers=self.parallel_sheets) as executor:
+                # Submit all tasks
+                future_to_sheet = {
+                    executor.submit(process_single_sheet, sheet_name): sheet_name
+                    for sheet_name in sheet_names
+                }
+
+                # Collect results
+                for future in as_completed(future_to_sheet):
+                    sheet_name, html_path = future.result()
+                    if html_path:
+                        html_files[sheet_name] = html_path
+
+            return html_files
+
+        except Exception as e:
+            logger.error(f"Error in parallel Excel conversion: {str(e)}")
+            raise
+
+    def _extract_knowledge_parallel(
+        self, html_files: Dict[str, str], output_folder: Path
+    ) -> Dict[str, str]:
+        """
+        Extract knowledge from HTML files in parallel.
+
+        Args:
+            html_files: Dictionary mapping sheet names to HTML file paths
+            output_folder: Output directory
+
+        Returns:
+            Dictionary mapping sheet names to knowledge file paths
+        """
+        logger.info(f"Extracting knowledge from {len(html_files)} sheets in parallel")
+
+        knowledge_files = {}
+
+        def extract_single_knowledge(sheet_name, html_path):
+            """Extract knowledge from a single HTML file."""
+            try:
+                html_file_path = Path(html_path)
+                knowledge_path = self.knowledge_extractor.extract_knowledge_from_file(
+                    html_file_path, output_folder, 0
+                )
+
+                with self.thread_lock:
+                    logger.info(f"Extracted knowledge for sheet: {sheet_name}")
+
+                return sheet_name, str(knowledge_path)
+
+            except Exception as e:
+                with self.thread_lock:
+                    logger.error(
+                        f"Error extracting knowledge from {sheet_name}: {str(e)}"
+                    )
+                return sheet_name, None
+
+        # Process in parallel with rate limiting
+        with ThreadPoolExecutor(max_workers=self.parallel_sheets) as executor:
+            # Submit all tasks
+            future_to_sheet = {
+                executor.submit(
+                    extract_single_knowledge, sheet_name, html_path
+                ): sheet_name
+                for sheet_name, html_path in html_files.items()
+            }
+
+            # Collect results with rate limiting delay
+            for i, future in enumerate(as_completed(future_to_sheet)):
+                sheet_name, knowledge_path = future.result()
+                if knowledge_path:
+                    knowledge_files[sheet_name] = knowledge_path
+
+                # Add small delay to respect API rate limits
+                if i < len(future_to_sheet) - 1:  # Don't delay after the last one
+                    time.sleep(0.5)
+
+        return knowledge_files
+
+    def _extract_tables_parallel(
+        self, html_files: Dict[str, str], output_folder: Path, original_file_name: str
+    ) -> List[str]:
+        """
+        Extract tables from HTML files in parallel.
+
+        Args:
+            html_files: Dictionary mapping sheet names to HTML file paths
+            output_folder: Output directory
+            original_file_name: Name of the original Excel file
+
+        Returns:
+            List of paths to extracted table HTML files
+        """
+        logger.info(f"Extracting tables from {len(html_files)} sheets in parallel")
+
+        all_table_files = []
+
+        def extract_single_tables(sheet_name, html_path):
+            """Extract tables from a single HTML file."""
+            try:
+                html_file_path = Path(html_path)
+                table_files = self.table_extractor.extract_tables_from_file(
+                    html_file_path, output_folder, original_file_name
+                )
+
+                with self.thread_lock:
+                    logger.info(
+                        f"Extracted {len(table_files)} tables from sheet: {sheet_name}"
+                    )
+
+                return [str(path) for path in table_files]
+
+            except Exception as e:
+                with self.thread_lock:
+                    logger.error(f"Error extracting tables from {sheet_name}: {str(e)}")
+                return []
+
+        # Process in parallel
+        with ThreadPoolExecutor(max_workers=self.parallel_sheets) as executor:
+            # Submit all tasks
+            futures = [
+                executor.submit(extract_single_tables, sheet_name, html_path)
+                for sheet_name, html_path in html_files.items()
+            ]
+
+            # Collect results
+            for future in as_completed(futures):
+                table_files = future.result()
+                all_table_files.extend(table_files)
+
+        return all_table_files
 
 
 def main():
