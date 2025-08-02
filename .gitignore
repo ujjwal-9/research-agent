@@ -6,6 +6,7 @@ qdrant_storage
 src_old
 .cursor
 .cursorignore
+logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

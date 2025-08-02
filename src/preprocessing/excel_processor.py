@@ -108,6 +108,11 @@ class ExcelProcessor:
             folder_name = excel_path.parent.name
             output_folder = output_base_dir / folder_name
 
+            # Check if file has already been processed
+            if self._is_already_processed(excel_path, output_folder):
+                logger.info(f"✓ File already processed, skipping: {excel_path}")
+                return self._get_existing_results(excel_path, output_folder)
+
             results = {
                 "excel_file": str(excel_path),
                 "folder_name": folder_name,
@@ -333,7 +338,13 @@ class ExcelProcessor:
         ]
 
         for i, result in enumerate(results["results"], 1):
-            status = "✓ SUCCESS" if result["success"] else "✗ FAILED"
+            if result["success"] and result.get("skipped", False):
+                status = "⏭ SKIPPED (already processed)"
+            elif result["success"]:
+                status = "✓ SUCCESS"
+            else:
+                status = "✗ FAILED"
+
             report_lines.extend(
                 [
                     f"{i}. {result['excel_file']} - {status}",
@@ -571,6 +582,141 @@ class ExcelProcessor:
                 all_table_files.extend(table_files)
 
         return all_table_files
+
+    def _is_already_processed(self, excel_path: Path, output_folder: Path) -> bool:
+        """
+        Check if an Excel file has already been processed.
+
+        Args:
+            excel_path: Path to the Excel file
+            output_folder: Output directory for this file
+
+        Returns:
+            True if file has been processed, False otherwise
+        """
+        try:
+            logger.info(f"Checking if file already processed: {excel_path}")
+            logger.info(f"Output folder: {output_folder}")
+
+            # Check if output folder exists
+            if not output_folder.exists():
+                logger.info("Output folder does not exist - needs processing")
+                return False
+
+            # Get modification time of source file
+            source_mtime = excel_path.stat().st_mtime
+            logger.info(f"Source file modification time: {source_mtime}")
+
+            # Check for HTML files (primary indicator)
+            html_files = list(output_folder.glob("*.html"))
+            logger.info(f"Found {len(html_files)} HTML files in output folder")
+
+            if not html_files:
+                logger.info("No HTML files found - needs processing")
+                return False
+
+            # Check knowledge files as additional indicator
+            knowledge_files = list(output_folder.glob("*__knowledge_table_*.txt"))
+            logger.info(f"Found {len(knowledge_files)} knowledge files")
+
+            # Require both HTML and knowledge files to consider it processed
+            if len(knowledge_files) == 0:
+                logger.info("No knowledge files found - needs processing")
+                return False
+
+            # Check if any HTML file is newer than source
+            newest_html_time = 0
+            for html_file in html_files:
+                html_mtime = html_file.stat().st_mtime
+                newest_html_time = max(newest_html_time, html_mtime)
+                logger.info(f"HTML file {html_file.name}: {html_mtime}")
+
+            if newest_html_time > source_mtime:
+                # File has been processed and is up to date
+                logger.info(
+                    f"✓ Files are up to date (newest: {newest_html_time} > source: {source_mtime})"
+                )
+                return True
+            else:
+                # If HTML files exist but are older than source, reprocess
+                logger.info(
+                    f"Output files are older than source file - needs reprocessing"
+                )
+                return False
+
+        except Exception as e:
+            logger.warning(f"Error checking if file is processed: {str(e)}")
+            return False
+
+    def _get_existing_results(
+        self, excel_path: Path, output_folder: Path
+    ) -> Dict[str, any]:
+        """
+        Get results for an already processed file.
+
+        Args:
+            excel_path: Path to the Excel file
+            output_folder: Output directory for this file
+
+        Returns:
+            Dictionary containing existing results
+        """
+        try:
+            folder_name = excel_path.parent.name
+
+            # Find existing files
+            html_files = {}
+            knowledge_files = {}
+            table_files = []
+
+            # Get HTML files
+            for html_file in output_folder.glob("*.html"):
+                if "_table_" not in html_file.name:  # Skip table files
+                    # Extract sheet name from filename
+                    filename = html_file.stem
+                    # Remove the Excel filename prefix to get sheet name
+                    sheet_name = filename.replace(f"{excel_path.stem}_", "", 1)
+                    html_files[sheet_name] = str(html_file)
+                else:
+                    table_files.append(str(html_file))
+
+            # Get knowledge files
+            for knowledge_file in output_folder.glob("*__knowledge_table_*.txt"):
+                # Extract sheet name from filename
+                filename = knowledge_file.stem
+                # Parse: <sheet_name>__knowledge_table_<number>
+                if "__knowledge_table_" in filename:
+                    sheet_name = filename.split("__knowledge_table_")[0]
+                    knowledge_files[sheet_name] = str(knowledge_file)
+
+            results = {
+                "excel_file": str(excel_path),
+                "folder_name": folder_name,
+                "html_files": html_files,
+                "knowledge_files": knowledge_files,
+                "table_files": table_files,
+                "success": True,
+                "errors": [],
+                "skipped": True,  # Add flag to indicate this was skipped
+            }
+
+            logger.info(
+                f"Found existing results: {len(html_files)} HTML, {len(knowledge_files)} knowledge, {len(table_files)} table files"
+            )
+            return results
+
+        except Exception as e:
+            logger.error(f"Error reading existing results: {str(e)}")
+            # Return empty results to trigger reprocessing
+            return {
+                "excel_file": str(excel_path),
+                "folder_name": excel_path.parent.name,
+                "html_files": {},
+                "knowledge_files": {},
+                "table_files": [],
+                "success": False,
+                "errors": [f"Error reading existing results: {str(e)}"],
+            }
 
 
 def main():
