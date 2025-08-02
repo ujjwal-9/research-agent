@@ -82,8 +82,8 @@ class ContentChunker:
                     break
 
         # Apply table descriptions
-        for table_info in page.get("tables", []):
-            table_id = table_info["id"]
+        for i, table_info in enumerate(page.get("tables", [])):
+            table_id = table_info.get("id", f"table_{i}")
             table_content = table_info["content"]
 
             table_key = f"table_{page['page_index']}_{table_id}"
@@ -577,6 +577,13 @@ class ContentChunker:
             if link_safe_point is not None:
                 max_chars = link_safe_point
 
+        # Check if we're breaking inside a file path
+        if not self._is_safe_filepath_break(text, max_chars):
+            # Find the start of the current file path to avoid breaking it
+            filepath_safe_point = self._find_filepath_safe_point(text, max_chars)
+            if filepath_safe_point is not None:
+                max_chars = filepath_safe_point
+
         # Look for sentence breaks
         sentence_breaks = [m.end() for m in re.finditer(r"[.!?]\\s+", text[:max_chars])]
         if sentence_breaks:
@@ -591,8 +598,10 @@ class ContentChunker:
         candidate = max_chars
         while candidate > max_chars * 0.5:
             if candidate < len(text) and text[candidate].isspace():
-                # Double-check this doesn't break a link
-                if self._is_safe_link_break(text, candidate):
+                # Double-check this doesn't break a link or file path
+                if self._is_safe_link_break(
+                    text, candidate
+                ) and self._is_safe_filepath_break(text, candidate):
                     return candidate
             candidate -= 1
 
@@ -624,6 +633,10 @@ class ContentChunker:
             if match.start() < break_point < match.end():
                 return False
 
+        # Check for file paths that shouldn't be broken
+        if not self._is_safe_filepath_break(text, break_point):
+            return False
+
         return True
 
     def _find_link_safe_point(self, text: str, max_chars: int) -> Optional[int]:
@@ -644,6 +657,78 @@ class ContentChunker:
                         safe_point -= 1
                     if safe_point > max_chars * 0.5:  # Only if it's not too far back
                         return safe_point
+
+        return None
+
+    def _is_safe_filepath_break(self, text: str, break_point: int) -> bool:
+        """Check if breaking at this point would split a file path."""
+        # Look for file paths around the break point
+        before_text = text[:break_point]
+        after_text = text[break_point:]
+
+        # Check for markdown image references ![alt](path)
+        try:
+            img_pattern = r"!\[[^\]]*\]\([^\)]*\)"
+            for match in re.finditer(img_pattern, text):
+                if match.start() < break_point < match.end():
+                    return False
+        except re.error:
+            # If regex fails, skip this check
+            pass
+
+        # Check for file paths with common patterns
+        file_patterns = [
+            r"files/[^\s\)\]]+\.[a-zA-Z0-9]+",  # files/filename.ext
+            r"data/[^\s\)\]]+\.[a-zA-Z0-9]+",  # data/filename.ext
+            r"[^\s\(\)\[\]]+\.[a-zA-Z0-9]+",  # generic filename.ext
+        ]
+
+        # Look for file paths that span the break point
+        context_before = before_text[-50:] if len(before_text) >= 50 else before_text
+        context_after = after_text[:50] if len(after_text) >= 50 else after_text
+        context = context_before + context_after
+
+        for pattern in file_patterns:
+            try:
+                for match in re.finditer(pattern, context):
+                    # Calculate actual position in the full text
+                    match_start = len(before_text) - len(context_before) + match.start()
+                    match_end = len(before_text) - len(context_before) + match.end()
+
+                    if match_start < break_point < match_end:
+                        return False
+            except re.error:
+                # If regex fails, skip this pattern
+                continue
+
+        return True
+
+    def _find_filepath_safe_point(self, text: str, max_chars: int) -> Optional[int]:
+        """Find a safe point before a file path to avoid breaking it."""
+        # Look for file paths that encompass our break point
+        file_patterns = [
+            r"!\[[^\]]*\]\([^\)]*\)",  # ![alt](path)
+            r"files/[^\s\)\]]+\.[a-zA-Z0-9]+",  # files/filename.ext
+            r"data/[^\s\)\]]+\.[a-zA-Z0-9]+",  # data/filename.ext
+            r"[^\s\(\)\[\]]+\.[a-zA-Z0-9]+",  # generic filename.ext
+        ]
+
+        for pattern in file_patterns:
+            try:
+                for match in re.finditer(pattern, text):
+                    if match.start() < max_chars < match.end():
+                        # Find a safe break point before this file path
+                        safe_point = match.start()
+                        # Look for a good break point before the path
+                        while safe_point > 0 and not text[safe_point - 1].isspace():
+                            safe_point -= 1
+                        if (
+                            safe_point > max_chars * 0.5
+                        ):  # Only if it's not too far back
+                            return safe_point
+            except re.error:
+                # If regex fails, skip this pattern
+                continue
 
         return None
 
@@ -690,6 +775,48 @@ class ContentChunker:
 
         return links
 
+    def _extract_filepaths_from_content(self, content: str) -> List[Dict[str, str]]:
+        """Extract all file paths from content for metadata."""
+        filepaths = []
+
+        # Extract markdown image references ![alt](path)
+        img_refs = re.finditer(r"!\[([^\]]*)\]\(([^\)]+)\)", content)
+        for match in img_refs:
+            filepaths.append(
+                {
+                    "type": "image_reference",
+                    "alt_text": match.group(1),
+                    "path": match.group(2),
+                    "full_match": match.group(0),
+                }
+            )
+
+        # Extract file paths with extensions
+        file_patterns = [
+            (r"files/[^\s\)\]]+\.[a-zA-Z0-9]+", "files_directory"),
+            (r"data/[^\s\)\]]+\.[a-zA-Z0-9]+", "data_directory"),
+            (r"[^\s\(\)\[\]]+\.[a-zA-Z0-9]{1,4}(?=\s|$|[^\w.])", "generic_file"),
+        ]
+
+        for pattern, file_type in file_patterns:
+            try:
+                for match in re.finditer(pattern, content):
+                    filepath = match.group(0)
+                    # Skip if it's already captured as an image reference
+                    if not any(fp["path"] == filepath for fp in filepaths):
+                        filepaths.append(
+                            {
+                                "type": file_type,
+                                "path": filepath,
+                                "full_match": filepath,
+                            }
+                        )
+            except re.error:
+                # If regex fails, skip this pattern
+                continue
+
+        return filepaths
+
     def _is_table_line(self, line: str) -> bool:
         """Check if line is part of a markdown table."""
         if not line:
@@ -727,6 +854,12 @@ class ContentChunker:
         if links:
             metadata["links"] = links
             metadata["link_count"] = len(links)
+
+        # Extract and add file paths metadata
+        filepaths = self._extract_filepaths_from_content(content)
+        if filepaths:
+            metadata["filepaths"] = filepaths
+            metadata["filepath_count"] = len(filepaths)
 
         # Check for table references in content
         table_matches = re.findall(r"<table_([^>]+)_chunk_([^>]+)>", content)

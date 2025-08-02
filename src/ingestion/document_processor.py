@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import magic
 from mistralai import Mistral
 import anthropic
+import pandas as pd
 
 from .config import IngestionConfig
 
@@ -54,6 +55,7 @@ class DocumentProcessor:
             ".ppt": "application/vnd.ms-powerpoint",
             ".txt": "text/plain",
             ".md": "text/markdown",
+            ".csv": "text/csv",
             ".png": "image/png",
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
@@ -71,12 +73,18 @@ class DocumentProcessor:
             return self._process_pdf(file_path)
         elif "image/" in file_type:
             return self._process_image(file_path)
+        elif file_type in [
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel",
+        ]:
+            return self._process_excel_document(file_path)
         elif "officedocument" in file_type or file_type in [
             "application/msword",
-            "application/vnd.ms-excel",
             "application/vnd.ms-powerpoint",
         ]:
             return self._process_office_document(file_path)
+        elif file_type == "text/csv":
+            return self._process_csv_document(file_path)
         else:
             # Try to process as PDF anyway (Mistral can handle various formats)
             self.logger.warning(
@@ -260,7 +268,7 @@ class DocumentProcessor:
     async def generate_image_description(
         self, image_path: str, context_text: str = ""
     ) -> str:
-        """Generate description for an image using Anthropic Claude."""
+        """Generate description for an image using Anthropic Claude with retry logic."""
         try:
             # Check file size
             file_size = os.path.getsize(image_path)
@@ -288,8 +296,9 @@ class DocumentProcessor:
             # Create prompt for image description
             prompt = self._create_image_description_prompt(context_text)
 
-            # Call Anthropic API
-            response = self.anthropic_client.messages.create(
+            # Call Anthropic API with retry logic
+            response = await self._call_anthropic_with_retry(
+                "image",
                 model=self.config.anthropic_description_model,
                 max_tokens=1000,
                 messages=[
@@ -319,11 +328,12 @@ class DocumentProcessor:
     async def generate_table_description(
         self, table_content: str, context_text: str = ""
     ) -> str:
-        """Generate description for a table using Anthropic Claude."""
+        """Generate description for a table using Anthropic Claude with retry logic."""
         try:
             prompt = self._create_table_description_prompt(table_content, context_text)
 
-            response = self.anthropic_client.messages.create(
+            response = await self._call_anthropic_with_retry(
+                "table",
                 model=self.config.anthropic_description_model,
                 max_tokens=1500,
                 messages=[{"role": "user", "content": prompt}],
@@ -379,74 +389,299 @@ Be comprehensive and specific, as this description will be used for document sea
     async def process_images_batch(
         self, image_tasks: List[Tuple[str, str]]
     ) -> List[str]:
-        """Process multiple images in batches for efficiency."""
-        self.logger.info(f"🖼️  Processing {len(image_tasks)} images in batches")
+        """Process multiple images with controlled parallelization."""
+        self.logger.info(
+            f"🖼️  Processing {len(image_tasks)} images with max {self.config.parallel_description_calls} parallel calls"
+        )
 
-        batch_size = self.config.batch_size
+        # Use semaphore to limit concurrent API calls
+        semaphore = asyncio.Semaphore(self.config.parallel_description_calls)
+
+        async def process_single_image(image_path: str, context: str) -> str:
+            async with semaphore:
+                return await self.generate_image_description(image_path, context)
+
+        # Create all tasks
+        tasks = [
+            process_single_image(image_path, context)
+            for image_path, context in image_tasks
+        ]
+
+        # Process all tasks concurrently with controlled parallelism
+        self.logger.info(
+            f"Starting parallel processing of {len(tasks)} image descriptions"
+        )
+        descriptions = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle exceptions and build results
         all_descriptions = []
+        for i, result in enumerate(descriptions):
+            if isinstance(result, Exception):
+                image_path, _ = image_tasks[i]
+                self.logger.error(
+                    f"Image description failed for {image_path}: {result}"
+                )
+                all_descriptions.append(f"Image: {os.path.basename(image_path)}")
+            else:
+                all_descriptions.append(result)
 
-        for i in range(0, len(image_tasks), batch_size):
-            batch = image_tasks[i : i + batch_size]
-            self.logger.info(
-                f"Processing image batch {i//batch_size + 1}/{(len(image_tasks) + batch_size - 1)//batch_size}"
-            )
-
-            # Process batch concurrently
-            tasks = [
-                self.generate_image_description(image_path, context)
-                for image_path, context in batch
-            ]
-
-            batch_descriptions = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Handle exceptions
-            for j, result in enumerate(batch_descriptions):
-                if isinstance(result, Exception):
-                    image_path = batch[j][0]
-                    self.logger.error(f"Failed to process image {image_path}: {result}")
-                    all_descriptions.append(f"Image: {os.path.basename(image_path)}")
-                else:
-                    all_descriptions.append(result)
-
-            # Add delay between batches to respect rate limits
-            if i + batch_size < len(image_tasks):
-                await asyncio.sleep(2)
-
+        self.logger.info(
+            f"✅ Completed processing {len(all_descriptions)} image descriptions"
+        )
         return all_descriptions
 
     async def process_tables_batch(
         self, table_tasks: List[Tuple[str, str]]
     ) -> List[str]:
-        """Process multiple tables in batches for efficiency."""
-        self.logger.info(f"📊 Processing {len(table_tasks)} tables in batches")
+        """Process multiple tables with controlled parallelization."""
+        self.logger.info(
+            f"📊 Processing {len(table_tasks)} tables with max {self.config.parallel_description_calls} parallel calls"
+        )
 
-        batch_size = self.config.batch_size
+        # Use semaphore to limit concurrent API calls
+        semaphore = asyncio.Semaphore(self.config.parallel_description_calls)
+
+        async def process_single_table(table_content: str, context: str) -> str:
+            async with semaphore:
+                return await self.generate_table_description(table_content, context)
+
+        # Create all tasks
+        tasks = [
+            process_single_table(table_content, context)
+            for table_content, context in table_tasks
+        ]
+
+        # Process all tasks concurrently with controlled parallelism
+        self.logger.info(
+            f"Starting parallel processing of {len(tasks)} table descriptions"
+        )
+        descriptions = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle exceptions and build results
         all_descriptions = []
+        for i, result in enumerate(descriptions):
+            if isinstance(result, Exception):
+                table_content, _ = table_tasks[i]
+                self.logger.error(f"Table description failed: {result}")
+                all_descriptions.append(f"Table content: {table_content[:200]}...")
+            else:
+                all_descriptions.append(result)
 
-        for i in range(0, len(table_tasks), batch_size):
-            batch = table_tasks[i : i + batch_size]
-            self.logger.info(
-                f"Processing table batch {i//batch_size + 1}/{(len(table_tasks) + batch_size - 1)//batch_size}"
-            )
+        self.logger.info(
+            f"✅ Completed processing {len(all_descriptions)} table descriptions"
+        )
+        return all_descriptions
 
-            # Process batch concurrently
-            tasks = [
-                self.generate_table_description(table_content, context)
-                for table_content, context in batch
+    async def _call_anthropic_with_retry(self, request_type: str, **kwargs) -> Any:
+        """Call Anthropic API with retry logic and proper error handling."""
+        last_exception = None
+
+        for attempt in range(self.config.api_retry_attempts):
+            try:
+                # Add a small delay between retries
+                if attempt > 0:
+                    delay = self.config.api_retry_delay * (
+                        2 ** (attempt - 1)
+                    )  # Exponential backoff
+                    self.logger.info(
+                        f"Retrying {request_type} description (attempt {attempt + 1}/{self.config.api_retry_attempts}) after {delay:.1f}s delay"
+                    )
+                    await asyncio.sleep(delay)
+
+                # Make the API call
+                response = self.anthropic_client.messages.create(**kwargs)
+
+                # If successful, return the response
+                return response
+
+            except anthropic.APIError as e:
+                last_exception = e
+                error_code = getattr(e, "status_code", "unknown")
+                error_type = getattr(e, "type", "unknown")
+                error_message = str(e)
+
+                self.logger.warning(
+                    f"Anthropic API error for {request_type} description (attempt {attempt + 1}/{self.config.api_retry_attempts}): "
+                    f"Status {error_code}, Type: {error_type}, Message: {error_message}"
+                )
+
+                # Don't retry on certain error types
+                if error_code in [
+                    400,
+                    401,
+                    403,
+                ]:  # Bad request, unauthorized, forbidden
+                    self.logger.error(
+                        f"Non-retryable error for {request_type} description: {error_message}"
+                    )
+                    break
+
+            except Exception as e:
+                last_exception = e
+                self.logger.warning(
+                    f"Unexpected error for {request_type} description (attempt {attempt + 1}/{self.config.api_retry_attempts}): {e}"
+                )
+
+        # If we get here, all retries failed
+        self.logger.error(
+            f"All {self.config.api_retry_attempts} retry attempts failed for {request_type} description. "
+            f"Last error: {last_exception}"
+        )
+        raise last_exception
+
+    def _process_excel_document(self, file_path: str) -> List[Dict[str, Any]]:
+        """Process Excel document by reading all sheets and generating descriptions."""
+        try:
+            self.logger.info(f"📊 Processing Excel file: {os.path.basename(file_path)}")
+
+            # Read all sheets from the Excel file
+            excel_data = pd.read_excel(file_path, sheet_name=None)
+
+            pages = []
+            page_index = 1
+
+            for sheet_name, df in excel_data.items():
+                self.logger.info(f"📋 Processing sheet: {sheet_name}")
+
+                # Convert DataFrame to markdown table format
+                if not df.empty:
+                    # Clean up the data - handle NaN values
+                    df_clean = df.fillna("")
+
+                    # Convert to markdown table
+                    markdown_table = df_clean.to_markdown(index=False)
+
+                    # Create sheet content with context
+                    sheet_content = f"## Sheet: {sheet_name}\n\n"
+                    sheet_content += f"Rows: {len(df)}, Columns: {len(df.columns)}\n\n"
+                    sheet_content += f"Columns: {', '.join(df.columns)}\n\n"
+                    sheet_content += markdown_table
+
+                    # Create page data structure
+                    page_data = {
+                        "page_index": page_index,
+                        "text": sheet_content,
+                        "images": [],
+                        "tables": [
+                            {
+                                "content": markdown_table,
+                                "sheet_name": sheet_name,
+                                "rows": len(df),
+                                "columns": len(df.columns),
+                                "column_names": list(df.columns),
+                            }
+                        ],
+                    }
+
+                    pages.append(page_data)
+                    page_index += 1
+                else:
+                    self.logger.warning(f"Sheet '{sheet_name}' is empty, skipping")
+
+            if not pages:
+                # Create a minimal page if no sheets processed
+                pages.append(
+                    {
+                        "page_index": 1,
+                        "text": f"Excel file: {os.path.basename(file_path)} (no readable data)",
+                        "images": [],
+                        "tables": [],
+                    }
+                )
+
+            self.logger.info(f"✅ Processed Excel file with {len(pages)} sheets")
+            return pages
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to process Excel file {file_path}: {e}")
+            # Fallback to basic text processing
+            return [
+                {
+                    "page_index": 1,
+                    "text": f"Excel file: {os.path.basename(file_path)} (processing failed: {e})",
+                    "images": [],
+                    "tables": [],
+                }
             ]
 
-            batch_descriptions = await asyncio.gather(*tasks, return_exceptions=True)
+    def _process_csv_document(self, file_path: str) -> List[Dict[str, Any]]:
+        """Process CSV document by reading and generating description."""
+        try:
+            self.logger.info(f"📊 Processing CSV file: {os.path.basename(file_path)}")
 
-            # Handle exceptions
-            for j, result in enumerate(batch_descriptions):
-                if isinstance(result, Exception):
-                    self.logger.error(f"Failed to process table {j}: {result}")
-                    all_descriptions.append(f"Table: {table_tasks[j][0][:100]}...")
-                else:
-                    all_descriptions.append(result)
+            # Try to read CSV with different encodings
+            encodings = ["utf-8", "latin-1", "cp1252"]
+            df = None
 
-            # Add delay between batches to respect rate limits
-            if i + batch_size < len(table_tasks):
-                await asyncio.sleep(1)
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    self.logger.info(
+                        f"✅ Successfully read CSV with {encoding} encoding"
+                    )
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    self.logger.warning(f"Failed to read CSV with {encoding}: {e}")
+                    continue
 
-        return all_descriptions
+            if df is None:
+                raise Exception("Could not read CSV file with any encoding")
+
+            # Clean up the data
+            df_clean = df.fillna("")
+
+            # Convert to markdown table
+            markdown_table = df_clean.to_markdown(index=False)
+
+            # Create content with context
+            content = f"## CSV File: {os.path.basename(file_path)}\n\n"
+            content += f"Rows: {len(df)}, Columns: {len(df.columns)}\n\n"
+            content += f"Columns: {', '.join(df.columns)}\n\n"
+            content += markdown_table
+
+            # Create page data structure
+            page_data = {
+                "page_index": 1,
+                "text": content,
+                "images": [],
+                "tables": [
+                    {
+                        "content": markdown_table,
+                        "file_name": os.path.basename(file_path),
+                        "rows": len(df),
+                        "columns": len(df.columns),
+                        "column_names": list(df.columns),
+                    }
+                ],
+            }
+
+            self.logger.info(
+                f"✅ Processed CSV file with {len(df)} rows and {len(df.columns)} columns"
+            )
+            return [page_data]
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to process CSV file {file_path}: {e}")
+            # Fallback to basic text processing
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                return [
+                    {
+                        "page_index": 1,
+                        "text": f"CSV file: {os.path.basename(file_path)}\n\n{content[:2000]}{'...' if len(content) > 2000 else ''}",
+                        "images": [],
+                        "tables": [],
+                    }
+                ]
+            except:
+                return [
+                    {
+                        "page_index": 1,
+                        "text": f"CSV file: {os.path.basename(file_path)} (processing failed: {e})",
+                        "images": [],
+                        "tables": [],
+                    }
+                ]

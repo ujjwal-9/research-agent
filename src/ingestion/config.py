@@ -79,7 +79,7 @@ class IngestionConfig:
     @property
     def anthropic_description_model(self) -> str:
         """Get Anthropic description model."""
-        return os.getenv("ANTHROPIC_DESCRIPTION_MODEL", "claude-3-5-sonnet-20241022")
+        return os.getenv("ANTHROPIC_DESCRIPTION_MODEL", "claude-sonnet-4-20250514")
 
     @property
     def openai_embedding_model(self) -> str:
@@ -99,7 +99,7 @@ class IngestionConfig:
     @property
     def qdrant_collection_name(self) -> str:
         """Get Qdrant collection name."""
-        return os.getenv("QDRANT_COLLECTION_NAME", "documents")
+        return os.getenv("QDRANT_COLLECTION_NAME", "redesign")
 
     @property
     def chunk_size(self) -> int:
@@ -126,6 +126,21 @@ class IngestionConfig:
         """Get memory limit in MB."""
         return int(os.getenv("MEMORY_LIMIT_MB", "8000"))
 
+    @property
+    def parallel_description_calls(self) -> int:
+        """Get maximum parallel description calls."""
+        return int(os.getenv("PARALLEL_DESCRIPTION_CALLS", "3"))
+
+    @property
+    def api_retry_attempts(self) -> int:
+        """Get number of API retry attempts."""
+        return int(os.getenv("API_RETRY_ATTEMPTS", "3"))
+
+    @property
+    def api_retry_delay(self) -> float:
+        """Get API retry delay in seconds."""
+        return float(os.getenv("API_RETRY_DELAY", "2.0"))
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
@@ -139,4 +154,7 @@ class IngestionConfig:
             "max_image_size_mb": self.max_image_size_mb,
             "batch_size": self.batch_size,
             "memory_limit_mb": self.memory_limit_mb,
+            "parallel_description_calls": self.parallel_description_calls,
+            "api_retry_attempts": self.api_retry_attempts,
+            "api_retry_delay": self.api_retry_delay,
         }

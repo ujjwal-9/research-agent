@@ -193,8 +193,8 @@ class IngestionPipeline:
                 image_tasks.append((image_info["path"], page_context))
 
             # Collect table tasks
-            for table_info in page.get("tables", []):
-                table_key = f"table_{page['page_index']}_{table_info['id']}"
+            for i, table_info in enumerate(page.get("tables", [])):
+                table_key = f"table_{page['page_index']}_{table_info.get('id', i)}"
                 table_tasks.append((table_info["content"], page_context))
 
         # Process images and tables in parallel
@@ -220,8 +220,8 @@ class IngestionPipeline:
         table_descriptions = {}
         table_idx = 0
         for page in pages:
-            for table_info in page.get("tables", []):
-                table_key = f"table_{page['page_index']}_{table_info['id']}"
+            for i, table_info in enumerate(page.get("tables", [])):
+                table_key = f"table_{page['page_index']}_{table_info.get('id', i)}"
                 if table_idx < len(table_descriptions_list):
                     table_descriptions[table_key] = table_descriptions_list[table_idx]
                 table_idx += 1
