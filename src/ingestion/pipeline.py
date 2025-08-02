@@ -1,6 +1,7 @@
 """Main ingestion pipeline that orchestrates document processing, description generation, chunking, and vectorization."""
 
 import os
+import re
 import asyncio
 import logging
 from pathlib import Path
@@ -108,9 +109,16 @@ class IngestionPipeline:
             document_name = os.path.splitext(os.path.basename(file_path))[0]
             self.logger.info(f"📄 Starting document ingestion: {document_name}")
 
+            # Create output directory structure for images
+            doc_dir = os.path.join("data/processed_documents", document_name)
+            files_dir = os.path.join(doc_dir, "files")
+            os.makedirs(files_dir, exist_ok=True)
+
             # Step 1: Process document with OCR
             self.logger.info("🔍 Step 1: OCR processing")
-            pages = self.document_processor.process_document(file_path)
+            pages = self.document_processor.process_document(
+                file_path, files_dir, document_name
+            )
 
             if not pages:
                 error_msg = "No pages extracted from document"
@@ -132,7 +140,7 @@ class IngestionPipeline:
             # Step 3: Create chunks with descriptions
             self.logger.info("🔪 Step 3: Content chunking")
             chunks = self.chunker.chunk_document_pages(
-                pages, image_descriptions, table_descriptions
+                pages, image_descriptions, table_descriptions, document_name
             )
 
             if not chunks:
@@ -266,23 +274,18 @@ class IngestionPipeline:
     ):
         """Save processed document as markdown file with proper file structure."""
         try:
-            # Create output directory structure
+            # Get output directory structure (already created earlier)
             doc_dir = os.path.join("data/processed_documents", document_name)
             files_dir = os.path.join(doc_dir, "files")
-            os.makedirs(doc_dir, exist_ok=True)
-            os.makedirs(files_dir, exist_ok=True)
 
             # Build markdown content
             markdown_content = f"# {document_name}\\n\\n"
-            markdown_content += (
-                f"*Processed with Mistral OCR and Anthropic descriptions*\\n\\n"
-            )
 
-            # Copy and reference images properly
+            # Process pages and reference images properly
             for page in pages:
                 markdown_content += f"## Page {page['page_index']}\\n\\n"
 
-                # Process page content and copy images
+                # Process page content and update image references
                 page_content = self._process_page_content_with_files(
                     page,
                     image_descriptions,
@@ -311,41 +314,25 @@ class IngestionPipeline:
         files_dir: str,
         document_name: str,
     ) -> str:
-        """Process page content and copy image files to the proper structure."""
-        import shutil
-
+        """Process page content and update image references (images are already in correct location)."""
         content = page["text"]
 
-        # Apply image descriptions and copy files
+        # Apply image descriptions (images are already saved in correct location with correct names)
         for image_info in page.get("images", []):
             image_path = image_info["path"]
             original_filename = image_info["filename"]
 
-            # Create new filename with document reference
-            # Extract reference from original filename (remove extension)
-            base_name = os.path.splitext(original_filename)[0]
-            reference = base_name.split("-")[-1] if "-" in base_name else "img"
-            new_filename = f"{document_name}_{reference}.png"
+            # Images are already saved with the correct filename
+            current_filename = os.path.basename(image_path)
 
             description = image_descriptions.get(
                 image_path, f"Image: {original_filename}"
             )
 
-            # Copy image file to files directory
-            try:
-                if os.path.exists(image_path):
-                    new_image_path = os.path.join(files_dir, new_filename)
-                    shutil.copy2(image_path, new_image_path)
-                    self.logger.info(
-                        f"📋 Copied image: {original_filename} -> {new_filename}"
-                    )
-            except Exception as e:
-                self.logger.warning(f"⚠️  Failed to copy image {original_filename}: {e}")
-
             # Create enhanced image description with correct path
-            enhanced_description = f"<description_{new_filename}>{description}</description_{new_filename}>"
+            enhanced_description = f"<description_{current_filename}>{description}</description_{current_filename}>"
 
-            # Replace image references with new path
+            # Replace image references with correct path
             patterns = [
                 rf"!\\[([^\\]]*)\\]\\({re.escape(original_filename)}\\)",
                 re.escape(original_filename),
@@ -354,15 +341,15 @@ class IngestionPipeline:
             for pattern in patterns:
                 if re.search(pattern, content):
                     # Update the image reference to point to the files directory
-                    image_ref = f"![{new_filename}](files/{new_filename})"
+                    image_ref = f"![{current_filename}](files/{current_filename})"
                     content = re.sub(
                         pattern, f"{enhanced_description}\\n\\n{image_ref}", content
                     )
                     break
 
-        # Apply table descriptions
-        for table_info in page.get("tables", []):
-            table_id = table_info["id"]
+        # Apply table descriptions and save CSV files
+        for i, table_info in enumerate(page.get("tables", [])):
+            table_id = table_info.get("id", f"table_{i}")
             table_content = table_info["content"]
 
             table_key = f"table_{page['page_index']}_{table_id}"
@@ -370,13 +357,67 @@ class IngestionPipeline:
                 table_key, f"Table: {table_content[:100]}..."
             )
 
-            # Create enhanced table description
-            enhanced_description = f"<description_table_{table_id}>{description}</description_table_{table_id}>"
+            # Create CSV filename for table: {document_name}_table_{table_number}.csv
+            table_number = i + 1
+            csv_filename = f"{document_name}_table_{table_number}.csv"
+            csv_path = os.path.join(files_dir, csv_filename)
 
-            # Replace table content with description
-            content = content.replace(table_content, enhanced_description)
+            # Save table as CSV file
+            try:
+                self._save_table_as_csv(table_content, csv_path)
+                self.logger.info(f"📋 Saved table as CSV: {csv_filename}")
+            except Exception as e:
+                self.logger.warning(
+                    f"⚠️  Failed to save table as CSV {csv_filename}: {e}"
+                )
+
+            # Create enhanced table description with CSV reference
+            enhanced_description = f"<description_table_{table_id}>{description}</description_table_{table_id}>"
+            csv_ref = f"[Download CSV: {csv_filename}](files/{csv_filename})"
+
+            # Replace table content with description and CSV link
+            content = content.replace(
+                table_content, f"{enhanced_description}\n\n{csv_ref}"
+            )
 
         return content
+
+    def _save_table_as_csv(self, table_content: str, csv_path: str) -> None:
+        """Save table content as CSV file."""
+        import csv
+        import io
+        import re
+
+        # Parse markdown table to CSV
+        lines = table_content.strip().split("\n")
+
+        # Filter out separator lines (those with just |, -, :, and spaces)
+        data_lines = []
+        for line in lines:
+            if line.strip() and not re.match(r"^[\s\|:\-]+$", line.strip()):
+                data_lines.append(line)
+
+        if not data_lines:
+            return
+
+        # Parse table rows
+        rows = []
+        for line in data_lines:
+            # Split by | and clean up
+            cells = [cell.strip() for cell in line.split("|")]
+            # Remove empty cells at start/end (from leading/trailing |)
+            if cells and not cells[0]:
+                cells = cells[1:]
+            if cells and not cells[-1]:
+                cells = cells[:-1]
+            if cells:  # Only add non-empty rows
+                rows.append(cells)
+
+        # Write to CSV
+        with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+            if rows:
+                writer = csv.writer(csvfile)
+                writer.writerows(rows)
 
     def search_documents(
         self, query: str, limit: int = 10, document_name: Optional[str] = None

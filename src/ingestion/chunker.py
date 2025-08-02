@@ -31,6 +31,7 @@ class ContentChunker:
         pages: List[Dict[str, Any]],
         image_descriptions: Dict[str, str],
         table_descriptions: Dict[str, str],
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Chunk all pages of a document with descriptions applied."""
         all_chunks = []
@@ -41,7 +42,9 @@ class ContentChunker:
             )
 
             page_chunks = self.chunk_text_with_overlap(
-                page_content, page_number=page["page_index"]
+                page_content,
+                page_number=page["page_index"],
+                document_name=document_name,
             )
 
             all_chunks.extend(page_chunks)
@@ -100,7 +103,7 @@ class ContentChunker:
         return content
 
     def chunk_text_with_overlap(
-        self, text: str, page_number: Optional[int] = None
+        self, text: str, page_number: Optional[int] = None, document_name: str = None
     ) -> List[Dict[str, Any]]:
         """Intelligent content-aware chunking with overlap."""
         try:
@@ -109,7 +112,7 @@ class ContentChunker:
 
             if len(text) <= self.config.chunk_size:
                 chunk_data = self._create_chunk_metadata(
-                    text, page_number, 1, len(text)
+                    text, page_number, 1, len(text), document_name
                 )
                 return [chunk_data]
 
@@ -156,7 +159,11 @@ class ContentChunker:
             # Add remaining content
             if current_chunk.strip():
                 chunk_data = self._create_chunk_metadata(
-                    current_chunk, page_number, len(chunks) + 1, len(current_chunk)
+                    current_chunk,
+                    page_number,
+                    len(chunks) + 1,
+                    len(current_chunk),
+                    document_name,
                 )
                 chunks.append(chunk_data)
 
@@ -170,7 +177,7 @@ class ContentChunker:
                 f"❌ Error during chunking{page_info if 'page_info' in locals() else ''}: {e}"
             )
             # Fallback to simple chunking
-            return self._simple_chunk_fallback(text, page_number)
+            return self._simple_chunk_fallback(text, page_number, document_name)
 
     def _identify_content_blocks(self, text: str) -> List[Dict[str, Any]]:
         """Identify different types of content blocks."""
@@ -268,6 +275,7 @@ class ContentChunker:
         current_chunk: str,
         page_number: Optional[int],
         chunk_count: int,
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Process image description block according to chunking rules."""
         chunks = []
@@ -279,14 +287,18 @@ class ContentChunker:
             # Fits with current chunk
             new_chunk = current_chunk + "\\n" + block_text
             chunk_data = self._create_chunk_metadata(
-                new_chunk, page_number, chunk_count + 1, len(new_chunk)
+                new_chunk, page_number, chunk_count + 1, len(new_chunk), document_name
             )
             chunks.append(chunk_data)
         else:
             # Add current chunk if exists
             if current_chunk.strip():
                 chunk_data = self._create_chunk_metadata(
-                    current_chunk, page_number, chunk_count + 1, len(current_chunk)
+                    current_chunk,
+                    page_number,
+                    chunk_count + 1,
+                    len(current_chunk),
+                    document_name,
                 )
                 chunks.append(chunk_data)
                 chunk_count += 1
@@ -295,12 +307,16 @@ class ContentChunker:
             if len(block_text) > self.config.chunk_size:
                 chunks.extend(
                     self._chunk_large_description(
-                        block_text, "image", page_number, chunk_count
+                        block_text, "image", page_number, chunk_count, document_name
                     )
                 )
             else:
                 chunk_data = self._create_chunk_metadata(
-                    block_text, page_number, chunk_count + 1, len(block_text)
+                    block_text,
+                    page_number,
+                    chunk_count + 1,
+                    len(block_text),
+                    document_name,
                 )
                 chunks.append(chunk_data)
 
@@ -312,6 +328,7 @@ class ContentChunker:
         current_chunk: str,
         page_number: Optional[int],
         chunk_count: int,
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Process table description block according to chunking rules."""
         chunks = []
@@ -323,14 +340,18 @@ class ContentChunker:
             # Fits with current chunk
             new_chunk = current_chunk + "\\n" + block_text
             chunk_data = self._create_chunk_metadata(
-                new_chunk, page_number, chunk_count + 1, len(new_chunk)
+                new_chunk, page_number, chunk_count + 1, len(new_chunk), document_name
             )
             chunks.append(chunk_data)
         else:
             # Add current chunk if exists
             if current_chunk.strip():
                 chunk_data = self._create_chunk_metadata(
-                    current_chunk, page_number, chunk_count + 1, len(current_chunk)
+                    current_chunk,
+                    page_number,
+                    chunk_count + 1,
+                    len(current_chunk),
+                    document_name,
                 )
                 chunks.append(chunk_data)
                 chunk_count += 1
@@ -339,12 +360,16 @@ class ContentChunker:
             if len(block_text) > self.config.chunk_size:
                 chunks.extend(
                     self._chunk_large_description(
-                        block_text, "table", page_number, chunk_count
+                        block_text, "table", page_number, chunk_count, document_name
                     )
                 )
             else:
                 chunk_data = self._create_chunk_metadata(
-                    block_text, page_number, chunk_count + 1, len(block_text)
+                    block_text,
+                    page_number,
+                    chunk_count + 1,
+                    len(block_text),
+                    document_name,
                 )
                 chunks.append(chunk_data)
 
@@ -356,6 +381,7 @@ class ContentChunker:
         current_chunk: str,
         page_number: Optional[int],
         chunk_count: int,
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Process table block with row-aware chunking."""
         chunks = []
@@ -458,6 +484,7 @@ class ContentChunker:
         desc_type: str,
         page_number: Optional[int],
         chunk_count: int,
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Chunk large descriptions into multiple parts."""
         chunks = []
@@ -484,7 +511,11 @@ class ContentChunker:
             wrapped_chunk = f"<description_{reference}_chunk_{chunk_num}>{chunk_content}</description_{reference}_chunk_{chunk_num}>"
 
             chunk_data = self._create_chunk_metadata(
-                wrapped_chunk, page_number, chunk_count + chunk_num, len(wrapped_chunk)
+                wrapped_chunk,
+                page_number,
+                chunk_count + chunk_num,
+                len(wrapped_chunk),
+                document_name,
             )
             chunks.append(chunk_data)
             chunk_num += 1
@@ -525,6 +556,7 @@ class ContentChunker:
                 page_number,
                 chunk_count + 1,
                 len("\\n".join(table_lines)),
+                document_name,
             )
             return [chunk_data]
 
@@ -545,6 +577,7 @@ class ContentChunker:
                     page_number,
                     chunk_count + chunk_num,
                     len(wrapped_chunk),
+                    document_name,
                 )
                 chunks.append(chunk_data)
 
@@ -559,7 +592,11 @@ class ContentChunker:
             wrapped_chunk = f"<table_{table_ref}_chunk_{chunk_num}>\\n{chunk_content}\\n</table_{table_ref}_chunk_{chunk_num}>"
 
             chunk_data = self._create_chunk_metadata(
-                wrapped_chunk, page_number, chunk_count + chunk_num, len(wrapped_chunk)
+                wrapped_chunk,
+                page_number,
+                chunk_count + chunk_num,
+                len(wrapped_chunk),
+                document_name,
             )
             chunks.append(chunk_data)
 
@@ -831,6 +868,7 @@ class ContentChunker:
         page_number: Optional[int],
         chunk_number: int,
         chunk_size: int,
+        document_name: str = None,
     ) -> Dict[str, Any]:
         """Create chunk with metadata."""
         # Count tokens
@@ -861,6 +899,56 @@ class ContentChunker:
             metadata["filepaths"] = filepaths
             metadata["filepath_count"] = len(filepaths)
 
+        # Extract image file references from processed content
+        image_file_matches = re.findall(r"!\[([^\]]*)\]\(files/([^)]+)\)", content)
+        if image_file_matches:
+            image_files = []
+            for match in image_file_matches:
+                relative_path = f"files/{match[1]}"
+                image_file = {
+                    "alt": match[0],
+                    "filename": match[1],
+                    "path": relative_path,
+                }
+
+                # Add absolute embedded_documents path if document_name is available
+                if document_name:
+                    absolute_path = (
+                        f"data/processed_documents/{document_name}/{relative_path}"
+                    )
+                    image_file["embedded_documents_path"] = absolute_path
+
+                image_files.append(image_file)
+
+            metadata["image_files"] = image_files
+            metadata["image_file_count"] = len(image_files)
+
+        # Extract CSV file references from processed content
+        csv_file_matches = re.findall(
+            r"\[Download CSV: ([^\]]+)\]\(files/([^)]+)\)", content
+        )
+        if csv_file_matches:
+            csv_files = []
+            for match in csv_file_matches:
+                relative_path = f"files/{match[1]}"
+                csv_file = {
+                    "name": match[0],
+                    "filename": match[1],
+                    "path": relative_path,
+                }
+
+                # Add absolute embedded_documents path if document_name is available
+                if document_name:
+                    absolute_path = (
+                        f"data/processed_documents/{document_name}/{relative_path}"
+                    )
+                    csv_file["embedded_documents_path"] = absolute_path
+
+                csv_files.append(csv_file)
+
+            metadata["csv_files"] = csv_files
+            metadata["csv_file_count"] = len(csv_files)
+
         # Check for table references in content
         table_matches = re.findall(r"<table_([^>]+)_chunk_([^>]+)>", content)
         if table_matches:
@@ -877,7 +965,7 @@ class ContentChunker:
         return {"content": content, "metadata": metadata}
 
     def _simple_chunk_fallback(
-        self, text: str, page_number: Optional[int]
+        self, text: str, page_number: Optional[int], document_name: str = None
     ) -> List[Dict[str, Any]]:
         """Simple fallback chunking if main chunking fails."""
         chunks = []
@@ -886,7 +974,11 @@ class ContentChunker:
         for i in range(0, len(text), chunk_size):
             chunk_content = text[i : i + chunk_size]
             chunk_data = self._create_chunk_metadata(
-                chunk_content, page_number, len(chunks) + 1, len(chunk_content)
+                chunk_content,
+                page_number,
+                len(chunks) + 1,
+                len(chunk_content),
+                document_name,
             )
             chunks.append(chunk_data)
 

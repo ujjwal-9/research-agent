@@ -62,7 +62,9 @@ class DocumentProcessor:
         }
         return mime_map.get(ext, "application/octet-stream")
 
-    def process_document(self, file_path: str) -> List[Dict[str, Any]]:
+    def process_document(
+        self, file_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
         """Process a document and extract pages with OCR."""
         self.logger.info(f"📄 Processing document: {os.path.basename(file_path)}")
 
@@ -70,7 +72,7 @@ class DocumentProcessor:
         self.logger.info(f"📋 Detected file type: {file_type}")
 
         if file_type == "application/pdf":
-            return self._process_pdf(file_path)
+            return self._process_pdf(file_path, images_output_dir, document_name)
         elif "image/" in file_type:
             return self._process_image(file_path)
         elif file_type in [
@@ -82,7 +84,9 @@ class DocumentProcessor:
             "application/msword",
             "application/vnd.ms-powerpoint",
         ]:
-            return self._process_office_document(file_path)
+            return self._process_office_document(
+                file_path, images_output_dir, document_name
+            )
         elif file_type == "text/csv":
             return self._process_csv_document(file_path)
         else:
@@ -90,14 +94,21 @@ class DocumentProcessor:
             self.logger.warning(
                 f"Unknown file type {file_type}, attempting PDF processing"
             )
-            return self._process_pdf(file_path)
+            return self._process_pdf(file_path, images_output_dir, document_name)
 
-    def _process_pdf(self, pdf_path: str) -> List[Dict[str, Any]]:
+    def _process_pdf(
+        self, pdf_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
         """Process PDF document with Mistral OCR."""
         try:
             # Create images directory for extracted images
-            image_dir = "data/pdf_images"
-            os.makedirs(image_dir, exist_ok=True)
+            if images_output_dir:
+                image_dir = images_output_dir
+                os.makedirs(image_dir, exist_ok=True)
+            else:
+                # Fallback to old behavior if no output dir specified
+                image_dir = "data/pdf_images"
+                os.makedirs(image_dir, exist_ok=True)
 
             # Read PDF file
             with open(pdf_path, "rb") as pdf_file:
@@ -118,6 +129,10 @@ class DocumentProcessor:
             pages = []
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
 
+            # Use document_name if provided, otherwise fall back to pdf_name
+            doc_name_for_images = document_name if document_name else pdf_name
+            image_counter = 1  # Global counter for images across all pages
+
             for page_data in ocr_response.pages:
                 page_index = page_data.index
                 markdown_content = page_data.markdown
@@ -136,7 +151,17 @@ class DocumentProcessor:
                                     ",", 1
                                 )[1]
 
-                            image_filename = f"{pdf_name}-{page_index}-{img_idx}.png"
+                            # Use final naming convention if document_name provided, otherwise use old format
+                            if document_name and images_output_dir:
+                                image_filename = (
+                                    f"{doc_name_for_images}_image_{image_counter}.png"
+                                )
+                                image_counter += 1
+                            else:
+                                image_filename = (
+                                    f"{pdf_name}-{page_index}-{img_idx}.png"
+                                )
+
                             image_path = os.path.join(image_dir, image_filename)
 
                             try:
@@ -205,11 +230,13 @@ class DocumentProcessor:
             self.logger.error(f"Image processing failed: {e}")
             return []
 
-    def _process_office_document(self, doc_path: str) -> List[Dict[str, Any]]:
+    def _process_office_document(
+        self, doc_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
         """Process Office documents (Word, Excel, PowerPoint)."""
         # For Office documents, we'll try to process them with Mistral OCR
         # which can handle various document formats
-        return self._process_pdf(doc_path)
+        return self._process_pdf(doc_path, images_output_dir, document_name)
 
     def _extract_tables_from_markdown(
         self, markdown_content: str
@@ -286,10 +313,8 @@ class DocumentProcessor:
             with open(image_path, "rb") as img_file:
                 image_data = img_file.read()
 
-            # Detect media type
-            media_type = "image/png"
-            if image_data.startswith(b"\\xff\\xd8\\xff"):
-                media_type = "image/jpeg"
+            # Detect media type more accurately
+            media_type = self._detect_image_media_type(image_data, image_path)
 
             b64_image = base64.b64encode(image_data).decode("utf-8")
 
@@ -321,6 +346,49 @@ class DocumentProcessor:
 
             return response.content[0].text.strip()
 
+        except anthropic.APIError as e:
+            error_message = str(e)
+            if "Image does not match the provided media type" in error_message:
+                self.logger.warning(
+                    f"Media type mismatch for {image_path}, trying alternative detection"
+                )
+                # Try with a different media type
+                try:
+                    # Force JPEG if PNG failed
+                    alt_media_type = (
+                        "image/jpeg" if media_type == "image/png" else "image/png"
+                    )
+
+                    response = await self._call_anthropic_with_retry(
+                        "image",
+                        model=self.config.anthropic_description_model,
+                        max_tokens=1000,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": alt_media_type,
+                                            "data": b64_image,
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    )
+                    return response.content[0].text.strip()
+                except Exception as retry_e:
+                    self.logger.error(
+                        f"Alternative media type also failed for {image_path}: {retry_e}"
+                    )
+                    return f"Image: {os.path.basename(image_path)} (media type detection failed)"
+            else:
+                self.logger.error(f"Image description failed for {image_path}: {e}")
+                return f"Image: {os.path.basename(image_path)}"
         except Exception as e:
             self.logger.error(f"Image description failed for {image_path}: {e}")
             return f"Image: {os.path.basename(image_path)}"
@@ -358,6 +426,7 @@ Provide a comprehensive description that includes:
 3. Any text visible in the image
 4. The purpose or function of the image in the document context
 5. Technical details if it's a diagram, chart, or technical illustration
+6. What kinds of questions this image can answer (e.g., "What does X look like?", "How is Y structured?", "What are the components of Z?", "What process is shown?", "What relationships exist between elements?")
 
 Be specific and detailed, as this description will be used for document search and retrieval.
 """
@@ -382,6 +451,7 @@ Provide a detailed description that includes:
 5. Data types (numerical, categorical, dates, etc.)
 6. Notable values, outliers, or important entries
 7. How this table relates to the document context
+8. What kinds of questions this table can answer (e.g., "What is the value of X for Y?", "How does A compare to B?", "What trends exist over time?", "Which items have the highest/lowest values?", "What patterns or correlations are visible?", "What totals or summaries can be calculated?")
 
 Be comprehensive and specific, as this description will be used for document search and retrieval.
 """
@@ -528,6 +598,72 @@ Be comprehensive and specific, as this description will be used for document sea
             f"Last error: {last_exception}"
         )
         raise last_exception
+
+    def _detect_image_media_type(self, image_data: bytes, image_path: str) -> str:
+        """Detect the correct media type for an image."""
+        try:
+            # Check magic bytes for different image formats
+            if image_data.startswith(b"\\xff\\xd8\\xff"):
+                return "image/jpeg"
+            elif image_data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                return "image/png"
+            elif image_data.startswith(b"GIF87a") or image_data.startswith(b"GIF89a"):
+                return "image/gif"
+            elif image_data.startswith(b"RIFF") and b"WEBP" in image_data[:12]:
+                return "image/webp"
+            elif image_data.startswith(b"BM"):
+                return "image/bmp"
+            elif image_data.startswith(
+                b"\\x00\\x00\\x01\\x00"
+            ) or image_data.startswith(b"\\x00\\x00\\x02\\x00"):
+                return "image/x-icon"
+
+            # Fallback: try to detect from file extension
+            ext = os.path.splitext(image_path)[1].lower()
+            if ext in [".jpg", ".jpeg"]:
+                return "image/jpeg"
+            elif ext in [".png"]:
+                return "image/png"
+            elif ext in [".gif"]:
+                return "image/gif"
+            elif ext in [".webp"]:
+                return "image/webp"
+            elif ext in [".bmp"]:
+                return "image/bmp"
+            elif ext in [".ico"]:
+                return "image/x-icon"
+
+            # Try using python-magic if available
+            try:
+                mime_type = magic.from_buffer(image_data, mime=True)
+                if mime_type.startswith("image/"):
+                    # Map some common variations
+                    if "jpeg" in mime_type:
+                        return "image/jpeg"
+                    elif "png" in mime_type:
+                        return "image/png"
+                    elif "gif" in mime_type:
+                        return "image/gif"
+                    elif "webp" in mime_type:
+                        return "image/webp"
+                    elif "bmp" in mime_type:
+                        return "image/bmp"
+                    else:
+                        return mime_type
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to detect media type with python-magic: {e}"
+                )
+
+            # Ultimate fallback - default to PNG and let API handle it
+            self.logger.warning(
+                f"Could not detect media type for {image_path}, defaulting to image/png"
+            )
+            return "image/png"
+
+        except Exception as e:
+            self.logger.warning(f"Error detecting media type for {image_path}: {e}")
+            return "image/png"
 
     def _process_excel_document(self, file_path: str) -> List[Dict[str, Any]]:
         """Process Excel document by reading all sheets and generating descriptions."""

@@ -8,6 +8,7 @@ src_old
 .cursorignore
 logs/
 reference_code/
+docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
