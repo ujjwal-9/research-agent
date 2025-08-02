@@ -3,6 +3,9 @@
 data
 qdrant_storage
 *.md
+src_old
+.cursor
+.cursorignore
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
