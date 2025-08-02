@@ -5,10 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=0.60.0",
     "beautifulsoup4>=4.13.4",
     "lxml>=6.0.0",
+    "mistralai>=1.9.3",
     "openai>=1.98.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.1",
     "python-dotenv>=1.1.1",
+    "python-magic>=0.4.27",
+    "qdrant-client>=1.15.1",
+    "tiktoken>=0.9.0",
 ]

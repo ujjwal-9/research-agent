@@ -1,0 +1,14 @@
+This is a test document with some [example link](https://example.com) and another URL https://github.com/test/repo.
+
+This document contains email addresses like test@example.com and more content to test the ingestion pipeline.
+
+## Test Section
+
+This section has a table:
+
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Data 1   | Data 2   | Data 3   |
+| More     | Data     | Here     |
+
+And some more text after the table.
