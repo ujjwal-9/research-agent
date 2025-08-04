@@ -129,7 +129,11 @@ class ContentChunker:
                 if block["type"] == "image_description":
                     chunks.extend(
                         self._process_image_description_block(
-                            block_text, current_chunk, page_number, len(chunks)
+                            block_text,
+                            current_chunk,
+                            page_number,
+                            len(chunks),
+                            document_name,
                         )
                     )
                     current_chunk = ""
@@ -137,7 +141,11 @@ class ContentChunker:
                 elif block["type"] == "table_description":
                     chunks.extend(
                         self._process_table_description_block(
-                            block_text, current_chunk, page_number, len(chunks)
+                            block_text,
+                            current_chunk,
+                            page_number,
+                            len(chunks),
+                            document_name,
                         )
                     )
                     current_chunk = ""
@@ -145,14 +153,22 @@ class ContentChunker:
                 elif block["type"] == "table":
                     chunks.extend(
                         self._process_table_block(
-                            block, current_chunk, page_number, len(chunks)
+                            block,
+                            current_chunk,
+                            page_number,
+                            len(chunks),
+                            document_name,
                         )
                     )
                     current_chunk = ""
 
                 else:  # text block
                     current_chunk, new_chunks = self._process_text_block(
-                        block_text, current_chunk, page_number, len(chunks)
+                        block_text,
+                        current_chunk,
+                        page_number,
+                        len(chunks),
+                        document_name,
                     )
                     chunks.extend(new_chunks)
 
@@ -398,7 +414,9 @@ class ContentChunker:
         # Check if table needs chunking
         if len(block_text) > self.config.chunk_size:
             chunks.extend(
-                self._chunk_large_table(block["lines"], page_number, chunk_count)
+                self._chunk_large_table(
+                    block["lines"], page_number, chunk_count, document_name
+                )
             )
         else:
             chunk_data = self._create_chunk_metadata(
@@ -414,6 +432,7 @@ class ContentChunker:
         current_chunk: str,
         page_number: Optional[int],
         chunk_count: int,
+        document_name: str = None,
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """Process regular text block with overlap."""
         chunks = []
@@ -523,7 +542,11 @@ class ContentChunker:
         return chunks
 
     def _chunk_large_table(
-        self, table_lines: List[str], page_number: Optional[int], chunk_count: int
+        self,
+        table_lines: List[str],
+        page_number: Optional[int],
+        chunk_count: int,
+        document_name: str = None,
     ) -> List[Dict[str, Any]]:
         """Chunk large table without breaking rows."""
         chunks = []

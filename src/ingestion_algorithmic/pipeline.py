@@ -69,7 +69,7 @@ class IngestionPipeline:
                 self.logger.info(
                     f"🔄 Processing document: {os.path.basename(doc_path)}"
                 )
-                result = self.ingest_document(doc_path)
+                result = self.ingest_document(doc_path, directory_path)
 
                 if result["success"]:
                     results["processed"] += 1
@@ -103,13 +103,27 @@ class IngestionPipeline:
         )
         return results
 
-    def ingest_document(self, file_path: str) -> Dict[str, Any]:
+    def ingest_document(
+        self, file_path: str, base_directory: str = None
+    ) -> Dict[str, Any]:
         """Ingest a single document."""
         try:
-            document_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Calculate relative path structure to preserve folder hierarchy
+            if base_directory and os.path.exists(base_directory):
+                try:
+                    # Get relative path from base directory
+                    rel_path = os.path.relpath(file_path, base_directory)
+                    # Remove the file extension to get the document identifier
+                    document_name = os.path.splitext(rel_path)[0]
+                except ValueError:
+                    # If relative path calculation fails, fall back to basename
+                    document_name = os.path.splitext(os.path.basename(file_path))[0]
+            else:
+                document_name = os.path.splitext(os.path.basename(file_path))[0]
+
             self.logger.info(f"📄 Starting document ingestion: {document_name}")
 
-            # Create output directory structure for images
+            # Create output directory structure preserving folder hierarchy
             doc_dir = os.path.join("data/processed_documents", document_name)
             files_dir = os.path.join(doc_dir, "files")
             os.makedirs(files_dir, exist_ok=True)
@@ -278,8 +292,9 @@ class IngestionPipeline:
             doc_dir = os.path.join("data/processed_documents", document_name)
             files_dir = os.path.join(doc_dir, "files")
 
-            # Build markdown content
-            markdown_content = f"# {document_name}\\n\\n"
+            # Build markdown content with clean title
+            document_title = os.path.basename(document_name)
+            markdown_content = f"# {document_title}\\n\\n"
 
             # Process pages and reference images properly
             for page in pages:
@@ -295,8 +310,9 @@ class IngestionPipeline:
                 )
                 markdown_content += page_content + "\\n\\n"
 
-            # Save markdown file
-            output_path = os.path.join(doc_dir, f"{document_name}.md")
+            # Save markdown file with just the filename (not the full path structure again)
+            markdown_filename = os.path.basename(document_name) + ".md"
+            output_path = os.path.join(doc_dir, markdown_filename)
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(markdown_content)
 
@@ -357,19 +373,26 @@ class IngestionPipeline:
                 table_key, f"Table: {table_content[:100]}..."
             )
 
-            # Create CSV filename for table: {document_name}_table_{table_number}.csv
-            table_number = i + 1
-            csv_filename = f"{document_name}_table_{table_number}.csv"
-            csv_path = os.path.join(files_dir, csv_filename)
+            # Check if CSV file was already created (e.g., for Excel files)
+            existing_csv = table_info.get("csv_filename")
+            if existing_csv:
+                # Use existing CSV file from Excel processing
+                csv_filename = existing_csv
+                self.logger.info(f"📋 Using existing CSV file: {csv_filename}")
+            else:
+                # Create CSV filename for table: {document_name}_table_{table_number}.csv
+                table_number = i + 1
+                csv_filename = f"{document_name}_table_{table_number}.csv"
+                csv_path = os.path.join(files_dir, csv_filename)
 
-            # Save table as CSV file
-            try:
-                self._save_table_as_csv(table_content, csv_path)
-                self.logger.info(f"📋 Saved table as CSV: {csv_filename}")
-            except Exception as e:
-                self.logger.warning(
-                    f"⚠️  Failed to save table as CSV {csv_filename}: {e}"
-                )
+                # Save table as CSV file
+                try:
+                    self._save_table_as_csv(table_content, csv_path)
+                    self.logger.info(f"📋 Saved table as CSV: {csv_filename}")
+                except Exception as e:
+                    self.logger.warning(
+                        f"⚠️  Failed to save table as CSV {csv_filename}: {e}"
+                    )
 
             # Create enhanced table description with CSV reference
             enhanced_description = f"<description_table_{table_id}>{description}</description_table_{table_id}>"

@@ -79,7 +79,9 @@ class DocumentProcessor:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "application/vnd.ms-excel",
         ]:
-            return self._process_excel_document(file_path)
+            return self._process_excel_document(
+                file_path, images_output_dir, document_name
+            )
         elif "officedocument" in file_type or file_type in [
             "application/msword",
             "application/vnd.ms-powerpoint",
@@ -447,7 +449,6 @@ Provide a detailed description that includes:
 1. The purpose and subject of the table
 2. Column headers and their meanings
 3. Key data patterns, trends, or insights
-4. Number of rows and columns
 5. Data types (numerical, categorical, dates, etc.)
 6. Notable values, outliers, or important entries
 7. How this table relates to the document context
@@ -665,10 +666,149 @@ Be comprehensive and specific, as this description will be used for document sea
             self.logger.warning(f"Error detecting media type for {image_path}: {e}")
             return "image/png"
 
-    def _process_excel_document(self, file_path: str) -> List[Dict[str, Any]]:
+    def _process_excel_document(
+        self, file_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
         """Process Excel document by reading all sheets and generating descriptions."""
+        # Check if user wants to use Unstructured loader instead
+        use_unstructured = os.getenv("USE_UNSTRUCTURED_EXCEL", "true").lower() == "true"
+
+        if use_unstructured:
+            return self._process_excel_with_unstructured(
+                file_path, images_output_dir, document_name
+            )
+        else:
+            return self._process_excel_with_pandas(
+                file_path, images_output_dir, document_name
+            )
+
+    def _process_excel_with_unstructured(
+        self, file_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
+        """Process Excel document using Unstructured loader."""
         try:
-            self.logger.info(f"📊 Processing Excel file: {os.path.basename(file_path)}")
+            from langchain_community.document_loaders import UnstructuredExcelLoader
+
+            self.logger.info(
+                f"📊 Processing Excel file with Unstructured: {os.path.basename(file_path)}"
+            )
+
+            # Load with Unstructured in elements mode for better structure preservation
+            loader = UnstructuredExcelLoader(file_path, mode="elements")
+            docs = loader.load()
+
+            pages = []
+            current_page = {
+                "page_index": 1,
+                "text": "",
+                "images": [],
+                "tables": [],
+            }
+
+            table_counter = 1
+
+            for doc in docs:
+                content = doc.page_content
+                metadata = doc.metadata
+
+                # Check if this is a table element
+                if metadata.get("category") == "Table":
+                    # Save as CSV if output directory is provided
+                    csv_filename = None
+                    csv_path = None
+                    if images_output_dir and document_name:
+                        csv_filename = f"{os.path.basename(document_name)}_table_{table_counter}.csv"
+                        csv_path = os.path.join(images_output_dir, csv_filename)
+
+                        try:
+                            # Try to parse table content and save as CSV
+                            if "text_as_html" in metadata:
+                                import pandas as pd
+                                from io import StringIO
+
+                                # Parse HTML table to DataFrame
+                                html_content = metadata["text_as_html"]
+                                df = pd.read_html(StringIO(html_content))[0]
+                                df.to_csv(csv_path, index=False)
+                                self.logger.info(f"💾 Saved CSV file: {csv_filename}")
+                            else:
+                                # Fallback: save raw content as CSV-like format
+                                with open(csv_path, "w", encoding="utf-8") as f:
+                                    f.write(content)
+                                self.logger.info(
+                                    f"💾 Saved table content: {csv_filename}"
+                                )
+                        except Exception as e:
+                            self.logger.warning(
+                                f"⚠️  Failed to save CSV file {csv_filename}: {e}"
+                            )
+                            csv_filename = None
+                            csv_path = None
+
+                    # Add table to current page
+                    sheet_name = metadata.get("page_name", f"Sheet_{table_counter}")
+                    table_data = {
+                        "id": f"table_{table_counter}",  # Add unique ID for description generation
+                        "content": content,
+                        "sheet_name": sheet_name,
+                        "category": metadata.get("category", "Table"),
+                    }
+
+                    if csv_filename:
+                        table_data["csv_filename"] = csv_filename
+                        table_data["csv_path"] = csv_path
+                        content += (
+                            f"\n\n[Download CSV: {csv_filename}](files/{csv_filename})"
+                        )
+
+                    current_page["tables"].append(table_data)
+                    table_counter += 1
+
+                # Add content to page text
+                if current_page["text"]:
+                    current_page["text"] += "\n\n"
+                current_page["text"] += content
+
+            if current_page["text"] or current_page["tables"]:
+                pages.append(current_page)
+
+            if not pages:
+                # Create a minimal page if no content processed
+                pages.append(
+                    {
+                        "page_index": 1,
+                        "text": f"Excel file: {os.path.basename(file_path)} (no readable data)",
+                        "images": [],
+                        "tables": [],
+                    }
+                )
+
+            self.logger.info(
+                f"✅ Processed Excel file with Unstructured: {len(pages)} pages, {table_counter-1} tables"
+            )
+            return pages
+
+        except ImportError:
+            self.logger.warning(
+                "UnstructuredExcelLoader not available, falling back to pandas method"
+            )
+            return self._process_excel_with_pandas(
+                file_path, images_output_dir, document_name
+            )
+        except Exception as e:
+            self.logger.error(f"❌ Failed to process Excel file with Unstructured: {e}")
+            return self._process_excel_with_pandas(
+                file_path, images_output_dir, document_name
+            )
+
+    def _process_excel_with_pandas(
+        self, file_path: str, images_output_dir: str = None, document_name: str = None
+    ) -> List[Dict[str, Any]]:
+        """Process Excel document using pandas (original method)."""
+        try:
+            self.logger.info(
+                f"📊 Processing Excel file with pandas: {os.path.basename(file_path)}"
+            )
 
             # Read all sheets from the Excel file
             excel_data = pd.read_excel(file_path, sheet_name=None)
@@ -687,26 +827,64 @@ Be comprehensive and specific, as this description will be used for document sea
                     # Convert to markdown table
                     markdown_table = df_clean.to_markdown(index=False)
 
+                    # Save CSV file if output directory is provided
+                    csv_filename = None
+                    csv_path = None
+                    if images_output_dir and document_name:
+                        # Create CSV filename: {document_name}_{sheet_name}.csv
+                        safe_sheet_name = "".join(
+                            c for c in sheet_name if c.isalnum() or c in (" ", "-", "_")
+                        ).strip()
+                        safe_sheet_name = safe_sheet_name.replace(" ", "_")
+                        csv_filename = (
+                            f"{os.path.basename(document_name)}_{safe_sheet_name}.csv"
+                        )
+                        csv_path = os.path.join(images_output_dir, csv_filename)
+
+                        try:
+                            df_clean.to_csv(csv_path, index=False)
+                            self.logger.info(f"💾 Saved CSV file: {csv_filename}")
+                        except Exception as e:
+                            self.logger.warning(
+                                f"⚠️  Failed to save CSV file {csv_filename}: {e}"
+                            )
+                            csv_filename = None
+                            csv_path = None
+
                     # Create sheet content with context
                     sheet_content = f"## Sheet: {sheet_name}\n\n"
                     sheet_content += f"Rows: {len(df)}, Columns: {len(df.columns)}\n\n"
                     sheet_content += f"Columns: {', '.join(df.columns)}\n\n"
+
+                    # Add CSV file reference if saved
+                    if csv_filename:
+                        sheet_content += (
+                            f"[Download CSV: {csv_filename}](files/{csv_filename})\n\n"
+                        )
+
                     sheet_content += markdown_table
+
+                    # Create table data structure
+                    table_data = {
+                        "id": f"sheet_{safe_sheet_name}",  # Add unique ID for description generation
+                        "content": markdown_table,
+                        "sheet_name": sheet_name,
+                        "rows": len(df),
+                        "columns": len(df.columns),
+                        "column_names": list(df.columns),
+                    }
+
+                    # Add CSV file info if saved
+                    if csv_filename:
+                        table_data["csv_filename"] = csv_filename
+                        table_data["csv_path"] = csv_path
 
                     # Create page data structure
                     page_data = {
                         "page_index": page_index,
                         "text": sheet_content,
                         "images": [],
-                        "tables": [
-                            {
-                                "content": markdown_table,
-                                "sheet_name": sheet_name,
-                                "rows": len(df),
-                                "columns": len(df.columns),
-                                "column_names": list(df.columns),
-                            }
-                        ],
+                        "tables": [table_data],
                     }
 
                     pages.append(page_data)

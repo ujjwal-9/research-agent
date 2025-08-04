@@ -9,7 +9,7 @@ from pathlib import Path
 # Add src to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.ingestion import IngestionPipeline, IngestionConfig
+from src.ingestion_algorithmic import IngestionPipeline, IngestionConfig
 
 
 def setup_logging():

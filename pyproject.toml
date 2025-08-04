@@ -16,4 +16,13 @@ dependencies = [
     "python-magic>=0.4.27",
     "qdrant-client>=1.15.1",
     "tiktoken>=0.9.0",
+    "unstructured>=0.18.11",
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-text-splitters>=0.3.0",
+    "langchain-experimental>=0.3.0",
+    "pillow>=10.0.0",
+    "neo4j>=5.28.2",
 ]
