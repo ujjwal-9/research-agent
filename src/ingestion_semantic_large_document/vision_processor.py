@@ -4,8 +4,7 @@ import asyncio
 import base64
 import io
 import logging
-import hashlib
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from PIL import Image
 
@@ -79,7 +78,7 @@ class VisionProcessor:
 
             resized_data = output.getvalue()
             self.logger.info(
-                f"📏 Resized image from {len(image_data)/1024:.1f}KB to {len(resized_data)/1024:.1f}KB"
+                f"📏 Resized image from {len(image_data) / 1024:.1f}KB to {len(resized_data) / 1024:.1f}KB"
             )
 
             return resized_data
@@ -261,7 +260,7 @@ Be thorough and precise to help with document search and retrieval."""
         for i, desc in enumerate(descriptions):
             if isinstance(desc, Exception):
                 self.logger.error(f"Error describing vision content {i}: {desc}")
-                desc = f"[Vision content - description error]"
+                desc = "[Vision content - description error]"
             valid_descriptions.append(desc)
 
         # Contextualize descriptions

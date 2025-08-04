@@ -2,11 +2,9 @@
 
 import asyncio
 import hashlib
-import json
 import logging
 import time
 from typing import Dict, List, Optional, Tuple
-from functools import lru_cache
 from dataclasses import dataclass
 
 from openai import OpenAI

@@ -9,10 +9,9 @@ This script:
 """
 
 import logging
-import os
 import shutil
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import pandas as pd
 from datetime import datetime
 

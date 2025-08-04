@@ -8,9 +8,8 @@ meaningful knowledge that can be stored as text files.
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
-import openai
 from openai import OpenAI
 import time
 
@@ -180,7 +179,7 @@ Extract meaningful knowledge from this content:"""
                 knowledge = f"""
 **Summary**: {title_text}
 - Data table with {row_count} rows
-- Columns: {', '.join(headers) if headers else 'Not clearly identified'}
+- Columns: {", ".join(headers) if headers else "Not clearly identified"}
 
 **Key Insights**: 
 - This appears to be a structured data table

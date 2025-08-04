@@ -37,7 +37,7 @@ class VectorStore:
         self.collection_name = config.qdrant_collection_name
         self.embedding_model = config.openai_embedding_model
 
-        self.logger.info(f"🗄️  VectorStore initialized:")
+        self.logger.info("🗄️  VectorStore initialized:")
         self.logger.info(f"  - Qdrant URL: {config.qdrant_url}")
         self.logger.info(f"  - Collection: {self.collection_name}")
         self.logger.info(f"  - Embedding Model: {self.embedding_model}")
@@ -163,7 +163,7 @@ class VectorStore:
                 )
 
                 self.logger.info(
-                    f"📤 Uploaded batch {i//batch_size + 1}/{(len(points) + batch_size - 1)//batch_size}"
+                    f"📤 Uploaded batch {i // batch_size + 1}/{(len(points) + batch_size - 1) // batch_size}"
                 )
 
             self.logger.info(

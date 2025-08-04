@@ -500,7 +500,7 @@ Key findings and insights are organized in the sections below, with supporting e
             )
 
         # Executive Summary
-        md_parts.append(f"\n## Executive Summary")
+        md_parts.append("\n## Executive Summary")
         md_parts.append(f"\n{report.executive_summary}")
 
         # Sections
@@ -509,11 +509,11 @@ Key findings and insights are organized in the sections below, with supporting e
             md_parts.append(f"\n{section.content}")
 
         # Methodology
-        md_parts.append(f"\n## Methodology")
+        md_parts.append("\n## Methodology")
         md_parts.append(f"\n{report.methodology}")
 
         # Sources
-        md_parts.append(f"\n## Sources")
+        md_parts.append("\n## Sources")
         for i, source in enumerate(report.sources, 1):
             md_parts.append(f"\n{i}. {source}")
 

@@ -75,7 +75,9 @@ def validate_files(input_paths):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process data and schema files or folders.")
+    parser = argparse.ArgumentParser(
+        description="Process data and schema files or folders."
+    )
     parser.add_argument(
         "--data",
         nargs="+",

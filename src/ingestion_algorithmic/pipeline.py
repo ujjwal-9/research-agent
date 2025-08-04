@@ -408,7 +408,6 @@ class IngestionPipeline:
     def _save_table_as_csv(self, table_content: str, csv_path: str) -> None:
         """Save table content as CSV file."""
         import csv
-        import io
         import re
 
         # Parse markdown table to CSV

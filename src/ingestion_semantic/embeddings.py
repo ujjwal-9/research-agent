@@ -6,7 +6,6 @@ import time
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
-import numpy as np
 from openai import OpenAI
 from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings

@@ -2,11 +2,8 @@
 Research planner agent for creating comprehensive research plans.
 """
 
-import logging
-import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass
-from datetime import datetime
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
 from ..tools.document_retriever import DocumentRetriever

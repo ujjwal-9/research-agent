@@ -8,9 +8,7 @@ preserving tables and formatting for further processing.
 import logging
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Optional
-from bs4 import BeautifulSoup
-import os
+from typing import Dict, Optional
 from .header_detector import HeaderDetector
 
 # Set up logging

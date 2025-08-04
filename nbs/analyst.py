@@ -10,7 +10,11 @@ from config.common_configs import options
 from openai import OpenAI
 from tqdm import tqdm
 
-from src.prompts.analyst_prompt import get_assistant_prompt, get_data_prompt, get_goahead_for_assistant
+from src.prompts.analyst_prompt import (
+    get_assistant_prompt,
+    get_data_prompt,
+    get_goahead_for_assistant,
+)
 from src.utils.Logger import Logger
 
 
@@ -50,7 +54,9 @@ class data_analyst:
     def convert_to_csv(self, input_file, **kwargs):
         filename, file_extension = os.path.splitext(input_file)
         file_extension = file_extension.lower()
-        output_file = os.path.join(self.kwargs["tmp_dir"], f"{filename}_{self.__unique_run_id}.csv")
+        output_file = os.path.join(
+            self.kwargs["tmp_dir"], f"{filename}_{self.__unique_run_id}.csv"
+        )
         try:
             if file_extension in [".csv"]:
                 # If the file is already a CSV, just save it as the output CSV
@@ -84,7 +90,7 @@ class data_analyst:
             else:
                 # Save to CSV
                 df.to_csv(output_file, index=False)
-                self.__logger.info(f"File successfully processed")
+                self.__logger.info("File successfully processed")
 
         except Exception as e:
             self.__logger.exception(f"Error processing file: {e}")
@@ -113,19 +119,25 @@ class data_analyst:
                 self.filemap[converted_file] = file
                 self.schemas.append(schema)
                 try:
-                    file = self.__llm_instance.files.create(file=open(converted_file, "rb"), purpose="assistants")
+                    file = self.__llm_instance.files.create(
+                        file=open(converted_file, "rb"), purpose="assistants"
+                    )
                     self.file_ids.append(file.id)
                     self.__logger.info(f"Upload File ID: {file.id}")
                 except Exception as e:
                     self.__logger.info(f"File upload failed, Exception: {e}")
                     pass
             except Exception as e:
-                self.__logger.info(f"Schema format not supported, use json. Exception: {e}")
+                self.__logger.info(
+                    f"Schema format not supported, use json. Exception: {e}"
+                )
 
     def create_thread(self, user_query: str, **kwargs):
         thread_ids, run_ids, user_prompts = [], [], []
 
-        for i, (file, schema, fileid) in enumerate(zip(self.filenames, self.schemas, self.file_ids)):
+        for i, (file, schema, fileid) in enumerate(
+            zip(self.filenames, self.schemas, self.file_ids)
+        ):
             user_prompt = get_data_prompt(user_query, schema)
 
             # Create thread
@@ -145,15 +157,21 @@ class data_analyst:
             )
             thread_ids.append(thread.id)
 
-            run = self.__llm_instance.beta.threads.runs.create(thread_id=thread.id, assistant_id=self.assistant_id)
+            run = self.__llm_instance.beta.threads.runs.create(
+                thread_id=thread.id, assistant_id=self.assistant_id
+            )
             run_ids.append(run.id)
             user_prompts.append(user_prompt)
-            self.__logger.info(f"Data Interpretation Running for File: {os.path.basename(file)}")
+            self.__logger.info(
+                f"Data Interpretation Running for File: {os.path.basename(file)}"
+            )
 
         return thread_ids, run_ids
 
     def use_created_knowledge(self, query):
-        system_prompt, user_prompt = get_goahead_for_assistant(query, self.conversation, self.schemas, self.filenames)
+        system_prompt, user_prompt = get_goahead_for_assistant(
+            query, self.conversation, self.schemas, self.filenames
+        )
         response = (
             self.__llm_instance.chat.completions.create(
                 model=self.__model,
@@ -165,7 +183,10 @@ class data_analyst:
             .choices[0]
             .message.content
         )
-        if "yes" in response.lower() or "use data analyst assistant" in response.lower():
+        if (
+            "yes" in response.lower()
+            or "use data analyst assistant" in response.lower()
+        ):
             self.use_assistant = True
         self.conversation += f"""
 user: {query}
@@ -200,7 +221,9 @@ agent: {response}
         total_files = len(thread_ids)  # Total number of files
 
         # Initialize tqdm progress bar with total equal to the number of files
-        with tqdm(total=total_files, desc="Processing Files", unit="file") as progress_bar:
+        with tqdm(
+            total=total_files, desc="Processing Files", unit="file"
+        ) as progress_bar:
             time_taken = 0  # Track elapsed time
 
             while time_taken < timeout:
@@ -208,13 +231,19 @@ agent: {response}
                 completed_files_current = 0
                 done_threads = []
 
-                for threadid, runid, filename in zip(thread_ids, run_ids, self.filenames):
+                for threadid, runid, filename in zip(
+                    thread_ids, run_ids, self.filenames
+                ):
                     if threadid in done_threads:
                         continue
                     # Retrieve run status for each thread and log it
-                    run = self.__llm_instance.beta.threads.runs.retrieve(thread_id=threadid, run_id=runid)
+                    run = self.__llm_instance.beta.threads.runs.retrieve(
+                        thread_id=threadid, run_id=runid
+                    )
                     status.append(run.status)
-                    self.__logger.info(f"Status for {os.path.basename(filename)}: {status[-1]}")
+                    self.__logger.info(
+                        f"Status for {os.path.basename(filename)}: {status[-1]}"
+                    )
 
                     # Count the number of completed files
                     if run.status == "completed":
@@ -248,7 +277,9 @@ agent: {response}
             self.__logger.info(f"Deleted Assistant Instance: {assistant_id}")
             self.assistant = None
         except:
-            self.__logger.error(f"Failed to delete assistant instance: {self.assistant_id}")
+            self.__logger.error(
+                f"Failed to delete assistant instance: {self.assistant_id}"
+            )
         try:
             if type(self.file_ids) == list:
                 for i, fileid in enumerate(reversed(self.file_ids)):
@@ -296,7 +327,7 @@ user: {user_query}
         try:
             while rerun < self.__assistant_reruns:
                 try:
-                    self.__logger.info(f"Starting data interpretation")
+                    self.__logger.info("Starting data interpretation")
                     response = self.use_created_knowledge(query)
                     if self.use_assistant:
                         if self.assistant is None:
@@ -309,15 +340,21 @@ user: {user_query}
                         self.__rerun = True
                         self.destroy_assistant()
                         rerun += 1
-                        self.__logger.warning("Assistant processing failed, retrying...")
+                        self.__logger.warning(
+                            "Assistant processing failed, retrying..."
+                        )
                     else:
                         this_conversation += f"agent: `(using just schema)` {response}"
                 except Exception as e:
-                    self.__logger.exception(f"Error while running data interpretation: {e}")
+                    self.__logger.exception(
+                        f"Error while running data interpretation: {e}"
+                    )
                     self.destroy_assistant()
                     rerun += 1
                     if rerun < self.__assistant_reruns:
-                        self.__logger.warning("Assistant processing failed, retrying...")
+                        self.__logger.warning(
+                            "Assistant processing failed, retrying..."
+                        )
                     self.__rerun = True
 
             if self.use_assistant:
@@ -325,7 +362,9 @@ user: {user_query}
                 for thread_id, filename in zip(thread_ids, self.filenames):
                     try:
                         assistant_response = (
-                            self.__llm_instance.beta.threads.messages.list(thread_id=thread_id)
+                            self.__llm_instance.beta.threads.messages.list(
+                                thread_id=thread_id
+                            )
                             .data[0]
                             .content[0]
                             .text.value
@@ -339,7 +378,9 @@ data analyst assistant: (used file {os.path.basename(self.filemap[filename])})
 {str(assistant_response)}
                         """
                     except Exception as e:
-                        self.__logger.exception(f"Error in {filename} to process data: {e}")
+                        self.__logger.exception(
+                            f"Error in {filename} to process data: {e}"
+                        )
                         continue
 
             response = self.sumarize_response(query, this_conversation)
@@ -391,7 +432,9 @@ if __name__ == "__main__":
             query = input("enter query: ")
             if query == "quit":
                 raise KeyboardInterrupt
-            response = loop.run_until_complete(agent.get_interpretations(user_query=query))
+            response = loop.run_until_complete(
+                agent.get_interpretations(user_query=query)
+            )
             print("*" * 100)
             conversation += f"""
 # User: {query}

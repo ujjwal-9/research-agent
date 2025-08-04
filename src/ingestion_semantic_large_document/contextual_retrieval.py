@@ -2,13 +2,11 @@
 
 import asyncio
 import hashlib
-import json
 import logging
 import re
 import time
 import tiktoken
 from typing import Dict, List, Optional, Tuple, Any
-from functools import lru_cache
 from dataclasses import dataclass
 
 from openai import OpenAI
@@ -164,7 +162,7 @@ class EnhancedContextualRetrieval:
         summary_prompt = f"""Analyze this document and provide a concise summary in 2-3 sentences that captures the main purpose, topic, and key information:
 
 <document>
-{document_content[:3000]}{'...' if len(document_content) > 3000 else ''}
+{document_content[:3000]}{"..." if len(document_content) > 3000 else ""}
 </document>
 
 Provide only the summary, nothing else."""
@@ -295,7 +293,9 @@ Please give a short succinct context to situate this chunk within the overall do
             position_desc = (
                 "beginning"
                 if document_position < 0.3
-                else "middle" if document_position < 0.7 else "end"
+                else "middle"
+                if document_position < 0.7
+                else "end"
             )
             context_parts.append(
                 f"Position: {position_desc} of document ({document_position:.1%})"
@@ -572,7 +572,7 @@ Based on the document context provided above, give a short succinct context (50-
 
         # Log token usage for monitoring
         self.logger.debug(
-            f"✅ Token-safe context created: {final_tokens}/{self.max_embedding_tokens} tokens ({final_tokens/self.max_embedding_tokens*100:.1f}%)"
+            f"✅ Token-safe context created: {final_tokens}/{self.max_embedding_tokens} tokens ({final_tokens / self.max_embedding_tokens * 100:.1f}%)"
         )
 
         return contextualized_content

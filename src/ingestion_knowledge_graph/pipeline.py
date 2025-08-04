@@ -18,7 +18,7 @@ from langchain_community.document_loaders import (
 )
 
 from .config import KnowledgeGraphConfig
-from .extractor import KnowledgeGraphExtractor, KnowledgeGraphData
+from .extractor import KnowledgeGraphExtractor
 from .neo4j_manager import Neo4jManager
 
 

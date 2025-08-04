@@ -8,10 +8,10 @@ and includes example usage patterns.
 import logging
 import asyncio
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime
 
-from src.agents.orchestrator import ResearchOrchestrator, execute_research_workflow
+from src.agents.orchestrator import ResearchOrchestrator
 from src.tools.report_generator import ReportGenerator
 
 
@@ -69,7 +69,7 @@ class ResearchWorkflowManager:
             Dictionary containing workflow results and exported reports
         """
         try:
-            self.logger.info(f"🚀 Starting research workflow")
+            self.logger.info("🚀 Starting research workflow")
             self.logger.info(f"📝 Research Question: {research_question}")
 
             # Execute workflow

@@ -2,11 +2,9 @@
 Research orchestrator agent for coordinating the multi-agent research workflow.
 """
 
-import logging
-import asyncio
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .base_agent import (
     BaseAgent,
@@ -314,7 +312,7 @@ class ResearchOrchestrator(BaseAgent):
 - {len(research_plan.external_search_topics)} external topics to research
 - Focus on current trends and authoritative sources
 
-**Estimated Timeline:** {research_plan.estimated_timeline.get('total_estimated', 'Unknown')}
+**Estimated Timeline:** {research_plan.estimated_timeline.get("total_estimated", "Unknown")}
 
 **Success Criteria:**
 {chr(10).join(f"- {criterion}" for criterion in research_plan.success_criteria)}
@@ -430,7 +428,7 @@ class ResearchOrchestrator(BaseAgent):
             self.workflow_state.current_agent = current_agent
             self.workflow_state.last_update = datetime.now()
 
-        self.logger.info(f"📊 Workflow progress: {stage} ({progress*100:.0f}%)")
+        self.logger.info(f"📊 Workflow progress: {stage} ({progress * 100:.0f}%)")
 
     def get_workflow_status(self) -> Dict[str, Any]:
         """Get current workflow status.

@@ -8,7 +8,6 @@ import json
 import logging
 import uuid
 import asyncio
-import time
 import gc
 import psutil
 from datetime import datetime
@@ -1113,7 +1112,7 @@ class DocumentProcessor:
                     ):  # Log first few cross-page preservations
                         self.logger.info(
                             f"💾 Preserving cross-page duplicate: "
-                            f"Chunk {i+1} (Page {current_page}) kept despite {match_type} match with chunk {match_info['index']+1} (Page {match_info['page']})"
+                            f"Chunk {i + 1} (Page {current_page}) kept despite {match_type} match with chunk {match_info['index'] + 1} (Page {match_info['page']})"
                         )
                 else:
                     # This is a duplicate that should be removed
@@ -1122,7 +1121,7 @@ class DocumentProcessor:
                     if duplicate_count <= 10:  # Log first 10 duplicates to avoid spam
                         self.logger.info(
                             f"🔄 Duplicate chunk #{duplicate_count}: "
-                            f"Chunk {i+1} (Page {current_page}) {match_type} matches chunk {match_info['index']+1} (Page {match_info['page']})"
+                            f"Chunk {i + 1} (Page {current_page}) {match_type} matches chunk {match_info['index'] + 1} (Page {match_info['page']})"
                         )
                     elif duplicate_count == 11:
                         self.logger.info(
@@ -1140,7 +1139,7 @@ class DocumentProcessor:
 
         # Log deduplication summary
         if duplicate_count > 0 or cross_page_preserved > 0 or fuzzy_duplicates > 0:
-            self.logger.info(f"📊 Deduplication summary:")
+            self.logger.info("📊 Deduplication summary:")
             self.logger.info(f"  - Removed {duplicate_count} duplicate chunks")
             if use_fuzzy_matching and fuzzy_duplicates > 0:
                 self.logger.info(
@@ -1331,7 +1330,7 @@ class DocumentProcessor:
                 self.logger.info("Content saved successfully")
 
             # Debug RAGFlow upload conditions
-            self.logger.info(f"📤 RAGFlow Upload Debug:")
+            self.logger.info("📤 RAGFlow Upload Debug:")
             self.logger.info(f"  - upload_to_ragflow: {upload_to_ragflow}")
             self.logger.info(f"  - ragflow_api_key set: {bool(self.ragflow_api_key)}")
             self.logger.info(f"  - ragflow_base_url set: {bool(self.ragflow_base_url)}")
@@ -1370,7 +1369,7 @@ class DocumentProcessor:
                                     chunks
                                 ):  # Log every 10 chunks or last chunk
                                     self.logger.info(
-                                        f"Uploaded chunk {i+1}/{len(chunks)}"
+                                        f"Uploaded chunk {i + 1}/{len(chunks)}"
                                     )
 
                         self.logger.info("Successfully uploaded all chunks to RAGFlow")

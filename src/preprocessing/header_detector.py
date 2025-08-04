@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 import pandas as pd
 from openai import OpenAI
-import time
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -224,7 +223,7 @@ Row number containing headers:"""
         if header_row_idx == -1 or header_row_idx >= len(data):
             # No headers detected, use column numbers as headers
             max_cols = max(len(row) for row in data) if data else 0
-            headers = [f"Column_{i+1}" for i in range(max_cols)]
+            headers = [f"Column_{i + 1}" for i in range(max_cols)]
             data_rows = data
         else:
             # Use detected header row
@@ -233,7 +232,7 @@ Row number containing headers:"""
 
         # Clean up headers
         headers = [
-            str(header).strip() if header else f"Column_{i+1}"
+            str(header).strip() if header else f"Column_{i + 1}"
             for i, header in enumerate(headers)
         ]
 

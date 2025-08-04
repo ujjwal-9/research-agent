@@ -4,11 +4,11 @@ Document retrieval tool for accessing internal documents from Qdrant.
 
 import logging
 import os
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 
 @dataclass

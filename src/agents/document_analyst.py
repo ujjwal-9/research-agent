@@ -2,9 +2,8 @@
 Document analyst agent for internal document research and analysis.
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState

@@ -172,7 +172,6 @@ def main():
 
         # Initialize pipeline
         with KnowledgeGraphPipeline(config) as pipeline:
-
             # Clear database if requested
             if args.clear_db:
                 logger.warning("⚠️  Clearing knowledge graph database")

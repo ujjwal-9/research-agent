@@ -117,7 +117,7 @@ def print_results(results: Dict[str, Any]):
 
 def compare_results(sequential: Dict[str, Any], parallel: Dict[str, Any]):
     """Compare sequential vs parallel results."""
-    print(f"\n🔥 PERFORMANCE COMPARISON")
+    print("\n🔥 PERFORMANCE COMPARISON")
     print("=" * 50)
 
     if sequential["total_time"] > 0:
@@ -127,11 +127,11 @@ def compare_results(sequential: Dict[str, Any], parallel: Dict[str, Any]):
 
         print(f"Speedup factor: {speedup:.2f}x")
         print(
-            f"Time saved: {time_saved:.2f}s ({(time_saved/sequential['total_time']*100):.1f}%)"
+            f"Time saved: {time_saved:.2f}s ({(time_saved / sequential['total_time'] * 100):.1f}%)"
         )
         print(f"Parallel efficiency: {efficiency:.1f}%")
 
-        print(f"\nThroughput comparison:")
+        print("\nThroughput comparison:")
         print(f"  Sequential: {sequential['docs_per_minute']:.1f} docs/min")
         print(f"  Parallel:   {parallel['docs_per_minute']:.1f} docs/min")
         print(
@@ -229,7 +229,7 @@ def main():
         if "sequential" in results and "parallel" in results:
             compare_results(results["sequential"], results["parallel"])
 
-        print(f"\n💡 Optimization Tips:")
+        print("\n💡 Optimization Tips:")
         if "parallel" in results:
             config = results["parallel"]["config"]
             print(
@@ -238,7 +238,7 @@ def main():
             print(
                 f"   • Try larger batch size: --embedding-batch-size {config['embedding_batch_size'] * 2}"
             )
-        print(f"   • Test with different document sizes: --doc-size large")
+        print("   • Test with different document sizes: --doc-size large")
         print(f"   • Test with more documents: --num-docs {args.num_docs * 2}")
 
     finally:

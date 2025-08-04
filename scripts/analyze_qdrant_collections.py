@@ -21,10 +21,9 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Any, Optional
+from typing import Dict, List, Any, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 
 def setup_logging():
@@ -215,7 +214,7 @@ def print_analysis_results(results: List[Dict[str, Any]], detailed: bool = False
         if "unique_filenames" in result:
             all_unique_filenames.update(result["unique_filenames"])
 
-    print(f"\n📈 OVERALL STATISTICS:")
+    print("\n📈 OVERALL STATISTICS:")
     print(f"   Total Points Across All Collections: {total_points_all:,}")
     print(f"   Total Unique Filenames: {len(all_unique_filenames)}")
     print(f"   Collections Analyzed: {len(results)}")
@@ -244,7 +243,7 @@ def print_analysis_results(results: List[Dict[str, Any]], detailed: bool = False
 
         # Top files by point count
         if result.get("points_per_filename"):
-            print(f"\n   📊 Top 10 Files by Point Count:")
+            print("\n   📊 Top 10 Files by Point Count:")
             sorted_files = sorted(
                 result["points_per_filename"].items(), key=lambda x: x[1], reverse=True
             )[:10]
@@ -254,20 +253,20 @@ def print_analysis_results(results: List[Dict[str, Any]], detailed: bool = False
 
         # Detailed file list
         if detailed and result.get("unique_filenames"):
-            print(f"\n   📋 All Files in Collection:")
+            print("\n   📋 All Files in Collection:")
             for filename in sorted(result["unique_filenames"]):
                 point_count = result["points_per_filename"].get(filename, 0)
                 print(f"      {filename}: {point_count:,} points")
 
         # Excel sheets
         if detailed and result.get("excel_sheets"):
-            print(f"\n   📄 Excel Sheets:")
+            print("\n   📄 Excel Sheets:")
             for sheet in result["excel_sheets"]:
                 print(f"      {sheet}")
 
     # Global unique filenames
     if detailed and all_unique_filenames:
-        print(f"\n🌍 ALL UNIQUE FILENAMES ACROSS COLLECTIONS:")
+        print("\n🌍 ALL UNIQUE FILENAMES ACROSS COLLECTIONS:")
         print("-" * 60)
         for filename in sorted(all_unique_filenames):
             # Count total points for this filename across all collections
@@ -334,7 +333,7 @@ def main():
                 for col in available_names:
                     logger.info(f"   - {col}")
                 print(
-                    f"\nUse --collection-name to specify a collection or --list-collections to see all available collections"
+                    "\nUse --collection-name to specify a collection or --list-collections to see all available collections"
                 )
                 return
 

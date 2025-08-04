@@ -5,7 +5,6 @@ This script tests the Excel processing pipeline without requiring OpenAI API key
 """
 
 import sys
-import os
 from pathlib import Path
 import logging
 from dotenv import load_dotenv

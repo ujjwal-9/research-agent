@@ -2,9 +2,8 @@
 Web researcher agent for external research and link analysis.
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState

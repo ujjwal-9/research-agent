@@ -4,7 +4,6 @@ import tempfile
 import pandas as pd
 import os
 import logging
-from pathlib import Path
 from unittest.mock import Mock
 
 # Set up logging for testing
@@ -84,7 +83,7 @@ def test_excel_sheet_metadata():
             sheet_name = embedder._extract_sheet_name(metadata)
             expected = expected_results[i]
             print(
-                f"✅ Test case {i+1}: {metadata} -> '{sheet_name}' (expected: '{expected}')"
+                f"✅ Test case {i + 1}: {metadata} -> '{sheet_name}' (expected: '{expected}')"
             )
             assert sheet_name == expected, f"Expected '{expected}', got '{sheet_name}'"
 

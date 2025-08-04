@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Test token management in enhanced contextual retrieval."""
 
-import pytest
 import sys
 from pathlib import Path
 
@@ -61,9 +60,9 @@ def test_token_safe_context_creation():
     final_tokens = retrieval._count_tokens(result)
     max_allowed = retrieval.max_embedding_tokens - retrieval.token_safety_margin
 
-    assert (
-        final_tokens <= max_allowed
-    ), f"Result has {final_tokens} tokens, max allowed is {max_allowed}"
+    assert final_tokens <= max_allowed, (
+        f"Result has {final_tokens} tokens, max allowed is {max_allowed}"
+    )
 
     # If chunk was truncated, check that result contains beginning of original chunk
     # If not truncated, original chunk should be fully preserved
@@ -75,12 +74,12 @@ def test_token_safe_context_creation():
             word in result for word in original_start.split()[:10]
         ), "Truncated chunk should preserve some original content"
     else:
-        assert (
-            large_chunk in result
-        ), "Original chunk content should be preserved when not truncated"
+        assert large_chunk in result, (
+            "Original chunk content should be preserved when not truncated"
+        )
 
     print(
-        f"✅ Token-safe context: {final_tokens}/{max_allowed} tokens ({final_tokens/max_allowed*100:.1f}%)"
+        f"✅ Token-safe context: {final_tokens}/{max_allowed} tokens ({final_tokens / max_allowed * 100:.1f}%)"
     )
 
 
@@ -101,9 +100,9 @@ def test_extremely_large_chunk_handling():
     final_tokens = retrieval._count_tokens(result)
     max_allowed = retrieval.max_embedding_tokens - retrieval.token_safety_margin
 
-    assert (
-        final_tokens <= max_allowed
-    ), f"Result has {final_tokens} tokens, max allowed is {max_allowed}"
+    assert final_tokens <= max_allowed, (
+        f"Result has {final_tokens} tokens, max allowed is {max_allowed}"
+    )
     assert len(result) < len(huge_chunk), "Huge chunk should be truncated"
 
     print(
@@ -138,16 +137,16 @@ def test_priority_system():
         assert chunk in result, "Chunk should be fully preserved when not too large"
     else:
         # If chunk was truncated, verify some content is preserved
-        assert any(
-            word in result for word in chunk.split()[:20]
-        ), "Some chunk content should be preserved"
+        assert any(word in result for word in chunk.split()[:20]), (
+            "Some chunk content should be preserved"
+        )
 
     # High priority context should be present if there's space
     context_tokens = retrieval._count_tokens(context)
     if chunk_tokens + context_tokens <= max_allowed:
-        assert (
-            context in result
-        ), "High priority context should be preserved when space allows"
+        assert context in result, (
+            "High priority context should be preserved when space allows"
+        )
 
     final_tokens = retrieval._count_tokens(result)
     max_allowed = retrieval.max_embedding_tokens - retrieval.token_safety_margin

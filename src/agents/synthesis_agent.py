@@ -2,16 +2,13 @@
 Synthesis agent for combining research findings into comprehensive reports.
 """
 
-import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass
-from datetime import datetime
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
 from ..tools.report_generator import ReportGenerator, ResearchReport
 from ..tools.document_retriever import SearchResult
 from ..tools.web_content_fetcher import WebContent
-from ..tools.link_extractor import ExtractedLink
 
 
 @dataclass
@@ -263,7 +260,7 @@ class SynthesisAgent(BaseAgent):
             internal_sources = len(set(r.source for r in doc_analysis.search_results))
             comparison_parts.extend(
                 [
-                    f"**Internal Findings:**",
+                    "**Internal Findings:**",
                     f"- {internal_count} relevant documents found",
                     f"- {internal_sources} unique internal sources analyzed",
                     f"- Key findings: {'; '.join(doc_analysis.key_findings[:3])}",
@@ -288,7 +285,7 @@ class SynthesisAgent(BaseAgent):
 
             comparison_parts.extend(
                 [
-                    f"**External Findings:**",
+                    "**External Findings:**",
                     f"- {external_successful} external sources successfully analyzed",
                     f"- {len(domains)} unique domains covered",
                     f"- Key insights: {'; '.join(web_analysis.key_insights[:3])}",
@@ -328,7 +325,7 @@ class SynthesisAgent(BaseAgent):
 
         assessment_parts.extend(
             [
-                f"**Planned Research:**",
+                "**Planned Research:**",
                 f"- {planned_internal} internal search queries planned",
                 f"- {planned_external} external topics planned",
             ]

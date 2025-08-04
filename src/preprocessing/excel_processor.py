@@ -10,7 +10,7 @@ This module coordinates the entire Excel processing pipeline:
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
@@ -640,7 +640,7 @@ class ExcelProcessor:
             else:
                 # If HTML files exist but are older than source, reprocess
                 logger.info(
-                    f"Output files are older than source file - needs reprocessing"
+                    "Output files are older than source file - needs reprocessing"
                 )
                 return False
 

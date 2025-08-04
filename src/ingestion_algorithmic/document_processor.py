@@ -6,7 +6,7 @@ import base64
 import asyncio
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 import magic
 from mistralai import Mistral
 import anthropic
@@ -305,7 +305,7 @@ class DocumentProcessor:
 
             if file_size > max_size:
                 self.logger.warning(
-                    f"Image {image_path} too large ({file_size/1024/1024:.1f}MB), skipping"
+                    f"Image {image_path} too large ({file_size / 1024 / 1024:.1f}MB), skipping"
                 )
                 return (
                     f"Image: {os.path.basename(image_path)} (too large for processing)"
@@ -784,7 +784,7 @@ Be comprehensive and specific, as this description will be used for document sea
                 )
 
             self.logger.info(
-                f"✅ Processed Excel file with Unstructured: {len(pages)} pages, {table_counter-1} tables"
+                f"✅ Processed Excel file with Unstructured: {len(pages)} pages, {table_counter - 1} tables"
             )
             return pages
 

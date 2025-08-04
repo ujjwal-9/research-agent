@@ -10,7 +10,6 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
-import re
 
 # Set up logging
 logger = logging.getLogger(__name__)

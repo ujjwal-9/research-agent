@@ -5,7 +5,6 @@ Web content fetcher tool for retrieving and processing content from external URL
 import logging
 import asyncio
 import aiohttp
-import requests
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse

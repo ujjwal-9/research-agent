@@ -4,7 +4,6 @@ import os
 import sys
 import argparse
 import logging
-from pathlib import Path
 
 # Add src to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -118,7 +117,7 @@ def main():
 
             result = pipeline.ingest_document(args.document)
             if result["success"]:
-                print(f"✅ Document processed successfully:")
+                print("✅ Document processed successfully:")
                 print(f"  Name: {result['document_name']}")
                 print(f"  Pages: {result['pages']}")
                 print(f"  Chunks: {result['chunks']}")
@@ -139,7 +138,7 @@ def main():
             result = pipeline.ingest_directory(args.input, args.patterns)
 
             if result["success"]:
-                print(f"\\n✅ Directory processing completed:")
+                print("\\n✅ Directory processing completed:")
                 print(f"  Processed: {result['processed']} documents")
                 print(f"  Failed: {result['failed']} documents")
 

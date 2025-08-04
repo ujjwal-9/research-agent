@@ -5,7 +5,6 @@ This script tests the parallel processing of multiple sheets.
 """
 
 import sys
-import os
 from pathlib import Path
 import logging
 from dotenv import load_dotenv

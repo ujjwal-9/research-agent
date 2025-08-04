@@ -12,7 +12,7 @@ from langchain_experimental.text_splitter import (
     SemanticChunker as LangChainSemanticChunker,
 )
 from langchain_openai import OpenAIEmbeddings
-from .contextual_retrieval import EnhancedContextualRetrieval, ContextualChunk
+from .contextual_retrieval import EnhancedContextualRetrieval
 
 
 class EnhancedSemanticChunker:

@@ -1,7 +1,7 @@
 """Neo4j Database Manager for Knowledge Graph Storage."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from neo4j import GraphDatabase, Driver
 from neo4j.exceptions import ServiceUnavailable, AuthError, ClientError
 
@@ -111,7 +111,6 @@ class Neo4jManager:
             with self.driver.session() as session:
                 # Start a transaction
                 with session.begin_transaction() as tx:
-
                     # Store document node
                     self._store_document(tx, kg_data.source_document)
 

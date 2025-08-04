@@ -13,7 +13,6 @@ Usage:
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -168,7 +167,7 @@ Examples:
             and hasattr(workflow_result, "comprehensive_answer")
             and workflow_result.comprehensive_answer
         ):
-            print(f"\n🎯 Comprehensive Research Answer:")
+            print("\n🎯 Comprehensive Research Answer:")
             print("=" * 60)
             print(workflow_result.comprehensive_answer)
             print("=" * 60)

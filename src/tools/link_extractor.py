@@ -3,7 +3,7 @@ Link extraction tool for collecting URLs from Qdrant document chunks.
 """
 
 import logging
-from typing import List, Dict, Set, Any
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from collections import defaultdict
 

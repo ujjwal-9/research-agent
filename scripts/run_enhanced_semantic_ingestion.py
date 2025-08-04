@@ -126,7 +126,7 @@ def ingest_single_file(
 
             # Enhanced statistics
             if stats.get("enhanced_contextualization"):
-                logger.info(f"🧠 Enhanced contextualization: Used")
+                logger.info("🧠 Enhanced contextualization: Used")
                 logger.info(
                     f"📊 Document structure analyzed: {stats.get('document_structure_analyzed', False)}"
                 )

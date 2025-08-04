@@ -5,7 +5,6 @@ This script tests the complete pipeline with header detection on one file.
 """
 
 import sys
-import os
 from pathlib import Path
 import logging
 from dotenv import load_dotenv

@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple
 
 from langchain_core.documents import Document
 from langchain_community.document_loaders import (
@@ -357,7 +357,7 @@ class EnhancedSemanticDocumentProcessor:
             r.get("statistics", {}).get("total_chunks_created", 0) for r in results
         )
 
-        self.logger.info(f"✅ Parallel batch processing completed:")
+        self.logger.info("✅ Parallel batch processing completed:")
         self.logger.info(f"  📊 Successful: {successful}/{len(file_paths)} documents")
         self.logger.info(f"  📊 Failed: {failed}/{len(file_paths)} documents")
         self.logger.info(f"  📊 Total chunks created: {total_chunks}")
@@ -396,7 +396,7 @@ class EnhancedSemanticDocumentProcessor:
             r.get("statistics", {}).get("total_chunks_created", 0) for r in results
         )
 
-        self.logger.info(f"✅ Sequential batch processing completed:")
+        self.logger.info("✅ Sequential batch processing completed:")
         self.logger.info(f"  📊 Successful: {successful}/{len(file_paths)} documents")
         self.logger.info(f"  📊 Failed: {failed}/{len(file_paths)} documents")
         self.logger.info(f"  📊 Total chunks created: {total_chunks}")
