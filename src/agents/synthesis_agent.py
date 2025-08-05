@@ -65,6 +65,11 @@ class SynthesisAgent(BaseAgent):
                 external_results.extend(web_analysis.web_content)
                 external_results.extend(web_analysis.link_research)
 
+            # Filter external results to exclude irrelevant content
+            external_results = self._filter_relevant_external_content(
+                external_results, plan.research_question
+            )
+
             # Generate comprehensive report
             report = self.report_generator.create_research_report(
                 title=f"Research Report: {plan.research_question}",
@@ -950,3 +955,123 @@ Structure your response with clear headings and bullet points where appropriate.
         )
 
         return "\n".join(answer_parts)
+
+    def _filter_relevant_external_content(
+        self, external_results, research_question: str
+    ):
+        """Filter external content to keep only medically relevant sources.
+
+        Args:
+            external_results: List of WebContent objects
+            research_question: The research question for context
+
+        Returns:
+            Filtered list of WebContent objects
+        """
+        if not external_results:
+            return []
+
+        filtered_results = []
+        medical_keywords = [
+            "copd",
+            "lung",
+            "pulmonary",
+            "respiratory",
+            "airway",
+            "bronch",
+            "medical",
+            "clinical",
+            "patient",
+            "study",
+            "research",
+            "assessment",
+            "function",
+            "ventilation",
+            "spirometry",
+            "imaging",
+            "ct",
+            "mri",
+            "diagnosis",
+        ]
+
+        # Domains to exclude as they're likely irrelevant
+        excluded_domains = [
+            "dictionary.cambridge.org",
+            "merriam-webster.com",
+            "dictionary.com",
+            "writingexplained.org",
+            "current-news.co.uk",
+            "expertforum.ro",
+            "experthax.com",
+            "pcekspert.com",
+            "forum.",
+            "reddit.com",
+            "stackoverflow.com",
+            "quora.com",
+        ]
+
+        for result in external_results:
+            if result.error or not result.content:
+                continue
+
+            # Check if domain should be excluded
+            if any(domain in result.url.lower() for domain in excluded_domains):
+                self.logger.debug(f"🚫 Excluded irrelevant domain: {result.url}")
+                continue
+
+            # Check content relevance
+            content_lower = result.content.lower()
+            title_lower = (result.title or "").lower()
+
+            # Count medical keywords in content and title
+            medical_score = 0
+            for keyword in medical_keywords:
+                medical_score += content_lower.count(keyword)
+                medical_score += (
+                    title_lower.count(keyword) * 2
+                )  # Title keywords weighted more
+
+            # Check if content seems medical/academic
+            academic_indicators = [
+                "abstract",
+                "conclusion",
+                "methodology",
+                "results",
+                "discussion",
+                "introduction",
+                "background",
+                "objective",
+                "pubmed",
+                "doi",
+                "journal",
+                "article",
+                "publication",
+                "citation",
+                "peer review",
+            ]
+
+            academic_score = sum(
+                1 for indicator in academic_indicators if indicator in content_lower
+            )
+
+            # Filter based on relevance scores
+            relevance_threshold = 3  # Minimum medical keywords
+            academic_threshold = 1  # Minimum academic indicators
+
+            if (
+                medical_score >= relevance_threshold
+                or academic_score >= academic_threshold
+            ):
+                filtered_results.append(result)
+                self.logger.debug(
+                    f"✅ Kept relevant source: {result.title} (medical: {medical_score}, academic: {academic_score})"
+                )
+            else:
+                self.logger.debug(
+                    f"🚫 Filtered out irrelevant source: {result.title} (medical: {medical_score}, academic: {academic_score})"
+                )
+
+        self.logger.info(
+            f"📝 Filtered external sources: {len(filtered_results)}/{len(external_results)} kept as relevant"
+        )
+        return filtered_results

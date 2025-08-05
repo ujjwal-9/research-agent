@@ -189,23 +189,95 @@ class WebResearcherAgent(BaseAgent):
             List of URLs from search results
         """
         try:
-            # Add medical/scientific domain filters for better results
-            medical_query = f"{query} site:pubmed.ncbi.nlm.nih.gov OR site:nejm.org OR site:thelancet.com OR site:bmj.com OR site:nature.com OR site:science.org OR site:cell.com OR site:nih.gov"
+            # Try multiple search strategies for better medical results
+            medical_urls = []
 
-            urls = []
+            # Strategy 1: Specific medical sites
+            medical_sites_query = f'"{query}" (site:pubmed.ncbi.nlm.nih.gov OR site:nejm.org OR site:thelancet.com OR site:bmj.com OR site:nature.com)'
 
-            # Run DuckDuckGo search in a thread to avoid blocking
-            def search_ddgs():
+            # Strategy 2: Broader medical search with medical terms
+            medical_terms_query = f'"{query}" COPD pulmonary lung function assessment'
+
+            # Strategy 3: Academic search with review/study terms
+            academic_query = f'"{query}" systematic review meta-analysis clinical study'
+
+            def search_ddgs_strategy(search_query: str, max_res: int = 5) -> List[str]:
                 ddgs = DDGS()
-                results = ddgs.text(medical_query, max_results=max_results)
-                return [result["href"] for result in results if "href" in result]
+                try:
+                    results = ddgs.text(search_query, max_results=max_res)
+                    found_urls = [
+                        result["href"] for result in results if "href" in result
+                    ]
+                    # Filter for medical/academic domains
+                    medical_domains = [
+                        "pubmed.ncbi.nlm.nih.gov",
+                        "ncbi.nlm.nih.gov",
+                        "nejm.org",
+                        "thelancet.com",
+                        "bmj.com",
+                        "nature.com",
+                        "science.org",
+                        "cell.com",
+                        "nih.gov",
+                        "ats.org",
+                        "thoracic.org",
+                        "erj.ersjournals.com",
+                        "academic.oup.com",
+                        "journals.lww.com",
+                        "springer.com",
+                        "onlinelibrary.wiley.com",
+                        "sciencedirect.com",
+                    ]
+                    filtered_urls = []
+                    for url in found_urls:
+                        if any(domain in url.lower() for domain in medical_domains):
+                            filtered_urls.append(url)
+                    return filtered_urls
+                except Exception:
+                    return []
 
-            # Execute search in thread pool to avoid blocking async loop
+            # Execute search strategies in thread pool
             loop = asyncio.get_event_loop()
-            urls = await loop.run_in_executor(None, search_ddgs)
 
-            self.logger.info(f"🔍 Found {len(urls)} URLs for query: {query}")
-            return urls
+            # Try medical sites first
+            medical_urls = await loop.run_in_executor(
+                None, search_ddgs_strategy, medical_sites_query, 8
+            )
+
+            # If not enough results, try broader medical search
+            if len(medical_urls) < 3:
+                additional_urls = await loop.run_in_executor(
+                    None, search_ddgs_strategy, medical_terms_query, 6
+                )
+                medical_urls.extend(additional_urls)
+
+            # If still not enough, try academic search
+            if len(medical_urls) < 3:
+                academic_urls = await loop.run_in_executor(
+                    None, search_ddgs_strategy, academic_query, 6
+                )
+                medical_urls.extend(academic_urls)
+
+            # Remove duplicates while preserving order
+            unique_urls = []
+            seen = set()
+            for url in medical_urls:
+                if url not in seen:
+                    unique_urls.append(url)
+                    seen.add(url)
+
+            # Limit results
+            final_urls = unique_urls[:max_results]
+
+            self.logger.info(
+                f'🔍 Found {len(final_urls)} medical URLs for query: "{query}"'
+            )
+            if final_urls:
+                self.logger.info(
+                    f"🏥 Sample domains: {[url.split('/')[2] for url in final_urls[:3]]}"
+                )
+
+            return final_urls
 
         except Exception as e:
             self.logger.warning(f"⚠️ DuckDuckGo search failed for '{query}': {e}")
@@ -221,15 +293,35 @@ class WebResearcherAgent(BaseAgent):
         Returns:
             List of fallback URLs
         """
-        query_encoded = query.replace(" ", "+")
+        import urllib.parse
+
+        # Clean and encode query for different search engines
+        query_encoded = urllib.parse.quote_plus(query)
+        query_simple = query.replace(" ", "+")
+
+        # Add COPD-specific terms to improve relevance
+        medical_query = f"{query} COPD lung function"
+        medical_encoded = urllib.parse.quote_plus(medical_query)
 
         fallback_urls = [
+            # PubMed with original query
             f"https://pubmed.ncbi.nlm.nih.gov/?term={query_encoded}",
-            f"https://scholar.google.com/scholar?q={query_encoded}",
+            # PubMed with enhanced medical terms
+            f"https://pubmed.ncbi.nlm.nih.gov/?term={medical_encoded}",
+            # PMC (full-text articles)
             f"https://www.ncbi.nlm.nih.gov/pmc/?term={query_encoded}",
+            # Google Scholar with medical focus
+            f"https://scholar.google.com/scholar?q={query_encoded}+COPD+lung+function",
+            # European Respiratory Journal
+            f"https://erj.ersjournals.com/search?text1={query_simple}&field1=ABSTRACT_TEXT",
+            # American Journal of Respiratory and Critical Care Medicine
+            f"https://www.atsjournals.org/action/doSearch?text1={query_simple}&field1=Abstract",
         ]
 
-        return fallback_urls[:3]  # Return 3 fallback URLs
+        self.logger.info(
+            f"🔧 Generated {len(fallback_urls)} fallback medical URLs for: {query}"
+        )
+        return fallback_urls[:5]  # Return top 5 fallback URLs
 
     async def _research_external_topics_fallback(
         self, topics: List[str]
