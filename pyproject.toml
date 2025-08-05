@@ -26,4 +26,5 @@ dependencies = [
     "pillow>=10.0.0",
     "neo4j>=5.28.2",
     "duckduckgo-search>=8.1.1",
+    "crewai[tools]>=0.152.0",
 ]
