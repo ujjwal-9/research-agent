@@ -477,11 +477,14 @@ Key findings and insights are organized in the sections below, with supporting e
 
         return sources
 
-    def export_to_markdown(self, report: ResearchReport) -> str:
+    def export_to_markdown(
+        self, report: ResearchReport, comprehensive_answer: str = None
+    ) -> str:
         """Export research report to markdown format.
 
         Args:
             report: ResearchReport to export
+            comprehensive_answer: Optional comprehensive answer to include
 
         Returns:
             Markdown formatted report
@@ -507,6 +510,11 @@ Key findings and insights are organized in the sections below, with supporting e
         for section in report.sections:
             md_parts.append(f"\n## {section.title}")
             md_parts.append(f"\n{section.content}")
+
+        # Comprehensive Answer (if provided)
+        if comprehensive_answer:
+            md_parts.append("\n## Comprehensive Research Answer")
+            md_parts.append(f"\n{comprehensive_answer}")
 
         # Methodology
         md_parts.append("\n## Methodology")

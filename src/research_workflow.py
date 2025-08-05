@@ -83,7 +83,8 @@ class ResearchWorkflowManager:
 
             if export_format in ["markdown", "both"]:
                 markdown_report = self.report_generator.export_to_markdown(
-                    workflow_result.research_report
+                    workflow_result.research_report,
+                    comprehensive_answer=workflow_result.comprehensive_answer,
                 )
                 exported_reports["markdown"] = markdown_report
 
@@ -189,8 +190,8 @@ class ResearchWorkflowManager:
         try:
             import openai
 
-            client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             # Simple test - just check if we can create a client
+            openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             validation_results["openai_connection"] = True
         except Exception as e:
             validation_results["openai_connection"] = False
