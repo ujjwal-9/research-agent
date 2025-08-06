@@ -116,11 +116,9 @@ class ExcelAnalyzer:
         1. Load and examine all the Excel files using pandas
         2. Understand the structure and content of each file
         3. Analyze the data to answer the user's specific query
-        4. Generate appropriate visualizations if helpful for the analysis
-        5. Provide clear, actionable insights
-        6. Save any plots or charts to the '{self.config.output_dir}' directory
-        7. Include data statistics, trends, or patterns that are relevant
-        8. Handle missing data or inconsistencies gracefully
+        4. Provide clear, actionable insights
+        5. Include data statistics, trends, or patterns that are relevant
+        6. Handle missing data or inconsistencies gracefully
         
         Libraries you might need: pandas, matplotlib, seaborn, numpy, openpyxl
         
@@ -140,9 +138,8 @@ class ExcelAnalyzer:
             1. Overview of the Excel files and their contents
             2. Direct answer to the user query: "{user_query}"
             3. Supporting data analysis and statistics
-            4. Visual representations (charts/plots) saved to files
-            5. Key insights and recommendations
-            6. Any limitations or assumptions made during analysis
+            4. Key insights and recommendations
+            5. Any limitations or assumptions made during analysis
             """,
             agent=self.data_analyst,
         )

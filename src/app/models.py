@@ -1,69 +1,79 @@
 """
-Data models for the chat API.
+Pydantic models for the chat API.
 """
 
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from datetime import datetime
 from enum import Enum
 
 
 class MessageRole(str, Enum):
-    """Role of a message in the chat."""
+    """Message role enumeration."""
 
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
 
 
-class ChatMessageRequest(BaseModel):
-    """Request model for chat messages."""
+class ChatMessage(BaseModel):
+    """Chat message model."""
 
-    message: str
-    session_id: Optional[str] = None
-
-
-class ChatMessageResponse(BaseModel):
-    """Response model for chat messages."""
-
-    message: str
     role: MessageRole
-    timestamp: datetime
-    session_id: str
+    content: str
+    timestamp: Optional[float] = None
 
 
-class ChatSessionCreate(BaseModel):
-    """Request model for creating a new chat session."""
+class ChatSessionRequest(BaseModel):
+    """Request to start a new chat session."""
 
     initial_question: str
 
 
-class ChatSessionResponse(BaseModel):
-    """Response model for chat session."""
+class ChatMessageRequest(BaseModel):
+    """Request to send a message in an existing chat session."""
+
+    message: str
+    session_id: str
+
+
+class ChatResponse(BaseModel):
+    """Chat response model."""
+
+    message: str
+    session_id: str
+    plan_available: bool = False
+    plan_approved: bool = False
+
+
+class ResearchPlanResponse(BaseModel):
+    """Research plan response model."""
+
+    research_question: str
+    research_methodology: str
+    internal_search_queries: List[str]
+    external_search_topics: List[str]
+    estimated_timeline: str
+    success_criteria: List[str]
+
+
+class StartResearchRequest(BaseModel):
+    """Request to start research workflow."""
 
     session_id: str
-    research_question: str
-    messages: List[ChatMessageResponse]
-    plan_approved: bool = False
+    use_code_interpreter: bool = True
 
 
 class WebSocketMessage(BaseModel):
     """WebSocket message model."""
 
-    type: str  # "message", "session_start", "session_end", "error"
+    type: str  # "start_session", "send_message", "get_plan", "start_research"
     data: Dict[str, Any]
-    session_id: Optional[str] = None
-    timestamp: datetime = None
-
-    def __init__(self, **data):
-        if data.get("timestamp") is None:
-            data["timestamp"] = datetime.now()
-        super().__init__(**data)
 
 
-class ErrorResponse(BaseModel):
-    """Error response model."""
+class WebSocketResponse(BaseModel):
+    """WebSocket response model."""
 
-    error: str
-    message: str
-    status_code: int
+    type: str  # "chat_response", "research_plan", "research_progress", "error"
+    data: Dict[str, Any]
+    success: bool = True
+    error: Optional[str] = None

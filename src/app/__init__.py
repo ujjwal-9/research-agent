@@ -1,7 +1,5 @@
 """
-Chat API application with WebSocket support.
+Research Chat API package.
 """
 
-from .main import app
-
-__all__ = ["app"]
+__version__ = "1.0.0"

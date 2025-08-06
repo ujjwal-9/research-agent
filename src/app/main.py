@@ -1,179 +1,194 @@
 """
-FastAPI application with WebSocket support for chat agents.
+FastAPI application with WebSocket endpoints for the chat agent.
 """
 
 import uuid
+import os
 import logging
-import json
-from typing import Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-from .models import (
-    ChatMessageRequest,
-    ChatMessageResponse,
-    ChatSessionCreate,
-    ChatSessionResponse,
-    ErrorResponse,
-)
+from .websocket_service import WebSocketManager
 from .chat_service import ChatService
-from .websocket_manager import ConnectionManager
+from .models import (
+    ChatSessionRequest,
+    ChatMessageRequest,
+    ChatResponse,
+    ResearchPlanResponse,
+    StartResearchRequest,
+)
 
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("/Users/ujjwal/code/redesign/logs/api.log"),
+        logging.StreamHandler(),
+    ],
+)
 
-# Create FastAPI app
 app = FastAPI(
     title="Research Chat API",
-    description="API for conversational research planning with multi-agent workflow",
+    description="WebSocket API for interactive research chat agent",
     version="1.0.0",
 )
 
-# Add CORS middleware
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this for production
+    allow_origins=["*"],  # Configure as needed for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize services
+# Initialize WebSocket manager
+websocket_manager = WebSocketManager()
+
+# Initialize chat service for REST endpoints
 chat_service = ChatService()
-connection_manager = ConnectionManager()
 
 
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {"message": "Research Chat API", "version": "1.0.0"}
+    return {
+        "message": "Research Chat API",
+        "version": "1.0.0",
+        "websocket_endpoint": "/ws/{connection_id}",
+    }
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "active_sessions": chat_service.get_active_sessions_count(),
-        "active_connections": len(connection_manager.active_connections),
-    }
+    return {"status": "healthy"}
 
 
-# REST API Endpoints
+# WebSocket endpoint
+@app.websocket("/ws/{connection_id}")
+async def websocket_endpoint(websocket: WebSocket, connection_id: str):
+    """
+    WebSocket endpoint for real-time chat communication.
 
+    Message types:
+    - start_session: {"type": "start_session", "data": {"initial_question": "..."}}
+    - send_message: {"type": "send_message", "data": {"session_id": "...", "message": "..."}}
+    - get_plan: {"type": "get_plan", "data": {"session_id": "..."}}
+    - start_research: {"type": "start_research", "data": {"session_id": "...", "use_code_interpreter": true}}
+    - get_session_status: {"type": "get_session_status", "data": {"session_id": "..."}}
+    """
+    await websocket_manager.connect(websocket, connection_id)
 
-@app.post("/api/sessions", response_model=ChatSessionResponse)
-async def create_session(request: ChatSessionCreate):
-    """Create a new chat session."""
     try:
-        session = await chat_service.create_session(request.initial_question)
-        return session
+        while True:
+            # Receive message
+            data = await websocket.receive_text()
+
+            # Handle message
+            await websocket_manager.handle_message(connection_id, data)
+
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(connection_id)
     except Exception as e:
-        logger.error(f"Error creating session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create session")
+        logging.error(f"WebSocket error for {connection_id}: {e}")
+        websocket_manager.disconnect(connection_id)
 
 
-@app.get("/api/sessions/{session_id}", response_model=ChatSessionResponse)
-async def get_session(session_id: str):
-    """Get details of an existing chat session."""
-    session = await chat_service.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
+# REST API endpoints (alternative to WebSocket)
 
 
-@app.post("/api/sessions/{session_id}/messages", response_model=ChatMessageResponse)
-async def send_message(session_id: str, request: ChatMessageRequest):
-    """Send a message to a chat session."""
+@app.post("/api/chat/session", response_model=ChatResponse)
+async def start_chat_session(request: ChatSessionRequest):
+    """Start a new chat session."""
     try:
-        response = await chat_service.send_message(session_id, request.message)
+        session_id, response = await chat_service.start_chat_session(
+            request.initial_question
+        )
+        return response
+    except Exception as e:
+        logging.error(f"Error starting chat session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat/message", response_model=ChatResponse)
+async def send_chat_message(request: ChatMessageRequest):
+    """Send a message to an existing chat session."""
+    try:
+        response = await chat_service.send_message(request.session_id, request.message)
         return response
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error sending message: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send message")
+        logging.error(f"Error sending message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/sessions/{session_id}")
-async def end_session(session_id: str):
-    """End a chat session."""
-    success = chat_service.end_session(session_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"message": "Session ended successfully"}
-
-
-# WebSocket Endpoint
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time chat."""
-    connection_id = str(uuid.uuid4())
-    await connection_manager.connect(websocket, connection_id)
-
+@app.get("/api/chat/plan/{session_id}", response_model=ResearchPlanResponse)
+async def get_research_plan(session_id: str):
+    """Get the research plan for a session."""
     try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-
-            try:
-                # Parse JSON message
-                message_data = json.loads(data)
-                await connection_manager.handle_message(connection_id, message_data)
-
-            except json.JSONDecodeError:
-                await connection_manager._send_error(
-                    connection_id, "Invalid JSON format"
-                )
-            except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
-                await connection_manager._send_error(
-                    connection_id, "Internal server error"
-                )
-
-    except WebSocketDisconnect:
-        connection_manager.disconnect(connection_id)
+        plan = chat_service.get_research_plan(session_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="No research plan found")
+        return plan
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        connection_manager.disconnect(connection_id)
+        logging.error(f"Error getting research plan: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# Exception handlers
+@app.post("/api/research/start")
+async def start_research(request: StartResearchRequest):
+    """Start the research workflow."""
+    try:
+        results = await chat_service.start_research(
+            request.session_id, request.use_code_interpreter
+        )
+        return {"status": "completed", "results": results}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error starting research: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Handle HTTP exceptions."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": "HTTP Error",
-            "message": exc.detail,
-            "status_code": exc.status_code,
-        },
-    )
+@app.get("/api/chat/status/{session_id}")
+async def get_session_status(session_id: str):
+    """Get the status of a chat session."""
+    try:
+        status = chat_service.get_session_status(session_id)
+        return status
+    except Exception as e:
+        logging.error(f"Error getting session status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    """Handle general exceptions."""
-    logger.error(f"Unhandled exception: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "Internal Server Error",
-            "message": "An unexpected error occurred",
-            "status_code": 500,
-        },
-    )
+@app.delete("/api/chat/session/{session_id}")
+async def cleanup_session(session_id: str):
+    """Clean up a chat session."""
+    try:
+        chat_service.cleanup_session(session_id)
+        return {"status": "cleaned"}
+    except Exception as e:
+        logging.error(f"Error cleaning up session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    # Check for OpenAI API key
+    if not os.getenv("OPENAI_API_KEY"):
+        print("❌ Error: OPENAI_API_KEY environment variable not set.")
+        print("Please set your OpenAI API key:")
+        print("export OPENAI_API_KEY='your-api-key-here'")
+        exit(1)
+
+    # Run the application
+    uvicorn.run(
+        "src.app.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+    )
