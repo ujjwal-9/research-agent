@@ -28,4 +28,7 @@ dependencies = [
     "duckduckgo-search>=8.1.1",
     "crewai[tools]>=0.152.0",
     "ddgs>=9.5.2",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+    "websockets>=15.0.1",
 ]
