@@ -9,5 +9,12 @@ from .document_retriever import DocumentRetriever
 from .link_extractor import LinkExtractor
 from .web_content_fetcher import WebContentFetcher
 from .report_generator import ReportGenerator
+from .excel_code_analyzer import ExcelCodeAnalyzer
 
-__all__ = ["DocumentRetriever", "LinkExtractor", "WebContentFetcher", "ReportGenerator"]
+__all__ = [
+    "DocumentRetriever",
+    "LinkExtractor",
+    "WebContentFetcher",
+    "ReportGenerator",
+    "ExcelCodeAnalyzer",
+]

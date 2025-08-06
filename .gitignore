@@ -1,5 +1,6 @@
 .env
 .venv
+outputs
 data
 qdrant_storage
 *.md

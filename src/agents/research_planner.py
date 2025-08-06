@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
-from ..tools.document_retriever import DocumentRetriever
+from src.tools.document_retriever import DocumentRetriever
 
 
 @dataclass

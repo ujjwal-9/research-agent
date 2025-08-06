@@ -7,8 +7,8 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
-from ..tools.web_content_fetcher import WebContentFetcher, WebContent
-from ..tools.link_extractor import ExtractedLink
+from src.tools.web_content_fetcher import WebContentFetcher, WebContent
+from src.tools.link_extractor import ExtractedLink
 
 try:
     from duckduckgo_search import DDGS

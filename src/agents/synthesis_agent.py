@@ -6,9 +6,9 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
-from ..tools.report_generator import ReportGenerator, ResearchReport
-from ..tools.document_retriever import SearchResult
-from ..tools.web_content_fetcher import WebContent
+from src.tools.report_generator import ReportGenerator, ResearchReport
+from src.tools.document_retriever import SearchResult
+from src.tools.web_content_fetcher import WebContent
 
 
 @dataclass

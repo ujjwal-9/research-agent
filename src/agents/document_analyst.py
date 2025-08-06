@@ -7,8 +7,9 @@ from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from .base_agent import BaseAgent, AgentContext, AgentResult, AgentState
-from ..tools.document_retriever import DocumentRetriever, SearchResult
-from ..tools.link_extractor import LinkExtractor, ExtractedLink
+from src.tools.document_retriever import DocumentRetriever, SearchResult
+from src.tools.link_extractor import LinkExtractor, ExtractedLink
+from src.tools.excel_code_analyzer import ExcelCodeAnalyzer, ExcelAnalysisResult
 
 
 @dataclass
@@ -21,6 +22,7 @@ class DocumentAnalysis:
     key_findings: List[str]
     coverage_analysis: Dict[str, Any]
     source_summary: Dict[str, Any]
+    excel_analysis: ExcelAnalysisResult = None
 
 
 class DocumentAnalystAgent(BaseAgent):
@@ -35,6 +37,7 @@ class DocumentAnalystAgent(BaseAgent):
         super().__init__("document_analyst")
         self.document_retriever = DocumentRetriever(collection_name)
         self.link_extractor = LinkExtractor(self.document_retriever)
+        self.excel_analyzer = ExcelCodeAnalyzer(self.document_retriever)
 
     async def execute(self, context: AgentContext) -> AgentResult:
         """Analyze internal documents based on research plan.
@@ -79,6 +82,11 @@ class DocumentAnalystAgent(BaseAgent):
             # Create source summary
             source_summary = await self._create_source_summary(all_search_results)
 
+            # Perform Excel analysis if Excel files are found in search results
+            excel_analysis = await self._perform_excel_analysis(
+                plan.research_question, all_search_results
+            )
+
             # Create document analysis
             analysis = DocumentAnalysis(
                 research_question=plan.research_question,
@@ -87,12 +95,21 @@ class DocumentAnalystAgent(BaseAgent):
                 key_findings=key_findings,
                 coverage_analysis=coverage_analysis,
                 source_summary=source_summary,
+                excel_analysis=excel_analysis,
             )
+
+            excel_info = ""
+            if excel_analysis and excel_analysis.success:
+                excel_info = (
+                    f", analyzed {len(excel_analysis.excel_files_analyzed)} Excel files"
+                )
+            elif excel_analysis and not excel_analysis.success:
+                excel_info = f", Excel analysis failed: {excel_analysis.error_message}"
 
             self.logger.info(
                 f"✅ Analyzed {len(all_search_results)} documents, "
                 f"found {len(key_findings)} key findings, "
-                f"extracted {len(extracted_links)} links"
+                f"extracted {len(extracted_links)} links{excel_info}"
             )
 
             return AgentResult(
@@ -471,3 +488,71 @@ class DocumentAnalystAgent(BaseAgent):
         }
 
         return summary
+
+    async def _perform_excel_analysis(
+        self, research_question: str, search_results: List[SearchResult]
+    ) -> ExcelAnalysisResult:
+        """Perform Excel code analysis on relevant Excel files found in search results.
+
+        Args:
+            research_question: The research question being investigated
+            search_results: List of search results to analyze for Excel files
+
+        Returns:
+            ExcelAnalysisResult containing the analysis or None if no Excel files found
+        """
+        try:
+            # Get Excel files summary first to check if any exist
+            excel_summary = self.excel_analyzer.get_excel_files_summary(search_results)
+
+            if excel_summary["excel_files_found"] == 0:
+                self.logger.info("📊 No Excel files found in search results")
+                return None
+
+            self.logger.info(
+                f"📊 Found {excel_summary['excel_files_found']} Excel files, performing code analysis"
+            )
+
+            # Build context for Excel analysis
+            excel_context = f"""
+            This analysis is part of a larger research investigation into: {research_question}
+            
+            The Excel files were identified from document chunks that were relevant to this research question.
+            Please focus your analysis on aspects that would help answer or provide insights into the research question.
+            
+            Consider:
+            - Data patterns that relate to the research question
+            - Key metrics, trends, or statistics
+            - Any correlations or insights that address the research objectives
+            - Data quality and completeness relevant to the research
+            """
+
+            # Perform the Excel analysis
+            analysis_result = self.excel_analyzer.analyze_excel_from_search_results(
+                search_results=search_results,
+                user_query=research_question,
+                additional_context=excel_context,
+            )
+
+            if analysis_result.success:
+                self.logger.info(
+                    f"✅ Excel analysis completed successfully for {len(analysis_result.excel_files_analyzed)} files"
+                )
+            else:
+                self.logger.warning(
+                    f"⚠️ Excel analysis failed: {analysis_result.error_message}"
+                )
+
+            return analysis_result
+
+        except Exception as e:
+            self.logger.error(f"❌ Error during Excel analysis: {e}")
+            # Return a failed analysis result rather than None to preserve error information
+            return ExcelAnalysisResult(
+                query=research_question,
+                excel_files_analyzed=[],
+                analysis_result={"success": False, "error": str(e)},
+                source_chunks=search_results,
+                success=False,
+                error_message=str(e),
+            )
