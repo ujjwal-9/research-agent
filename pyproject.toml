@@ -27,4 +27,5 @@ dependencies = [
     "neo4j>=5.28.2",
     "duckduckgo-search>=8.1.1",
     "crewai[tools]>=0.152.0",
+    "ddgs>=9.5.2",
 ]

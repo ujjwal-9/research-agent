@@ -82,10 +82,23 @@ class DocumentAnalystAgent(BaseAgent):
             # Create source summary
             source_summary = await self._create_source_summary(all_search_results)
 
-            # Perform Excel analysis if Excel files are found in search results
-            excel_analysis = await self._perform_excel_analysis(
-                plan.research_question, all_search_results
+            # Perform Excel analysis if enabled and Excel files are found in search results
+            use_code_interpreter = context.user_requirements.get(
+                "use_code_interpreter", True
             )
+            if use_code_interpreter:
+                excel_analysis = await self._perform_excel_analysis(
+                    plan.research_question, all_search_results
+                )
+                if excel_analysis:
+                    self.logger.info("📊 Excel analysis completed successfully")
+                else:
+                    self.logger.info("📊 No Excel files found for analysis")
+            else:
+                self.logger.info(
+                    "📊 Code interpreter disabled - skipping Excel analysis"
+                )
+                excel_analysis = None
 
             # Create document analysis
             analysis = DocumentAnalysis(

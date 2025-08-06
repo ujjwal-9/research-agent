@@ -15,6 +15,7 @@ from .document_analyst import DocumentAnalystAgent
 from .web_researcher import WebResearcherAgent
 from .synthesis_agent import SynthesisAgent
 from .orchestrator import ResearchOrchestrator
+from .chat_planner import ChatPlannerAgent
 
 __all__ = [
     "BaseAgent",
@@ -24,4 +25,5 @@ __all__ = [
     "WebResearcherAgent",
     "SynthesisAgent",
     "ResearchOrchestrator",
+    "ChatPlannerAgent",
 ]

@@ -57,11 +57,12 @@ class ResearchWorkflowResult:
 class ResearchOrchestrator(BaseAgent):
     """Main orchestrator for the multi-agent research workflow."""
 
-    def __init__(self, collection_name: str = None):
+    def __init__(self, collection_name: str = None, interactive_mode: bool = True):
         """Initialize the research orchestrator.
 
         Args:
             collection_name: Qdrant collection name for document retrieval
+            interactive_mode: Whether to enable interactive user prompts
         """
         super().__init__("orchestrator")
 
@@ -79,6 +80,7 @@ class ResearchOrchestrator(BaseAgent):
         self.workflow_state = None
         self.user_interactions = []
         self.execution_timeline = []
+        self.interactive_mode = interactive_mode
 
     def _setup_coordinator(self):
         """Setup the multi-agent coordinator with all agents."""
@@ -270,19 +272,42 @@ class ResearchOrchestrator(BaseAgent):
 
         self.logger.info(f"❓ {len(questions)} clarifying questions identified")
 
-        # Create user interaction for clarifying questions
+        if self.interactive_mode:
+            print("\n" + "=" * 60)
+            print("🤔 CLARIFICATION QUESTIONS")
+            print("=" * 60)
+            print(f"\nBased on your research question: '{context.research_question}'")
+            print(
+                "\nI have some clarifying questions to better understand your needs:\n"
+            )
+
+            # Collect answers to clarifying questions
+            answers = {}
+            for i, question in enumerate(questions, 1):
+                print(f"{i}. {question}")
+                answer = input("   Your answer (or press Enter to skip): ").strip()
+                if answer:
+                    answers[question] = answer
+                print()
+
+            # Update context with clarification answers
+            if answers:
+                context.user_requirements.update({"clarification_answers": answers})
+                self.logger.info(f"📝 Received {len(answers)} clarification answers")
+                print("✅ Thank you for the clarifications!")
+            else:
+                print("📝 Proceeding with original understanding.")
+
+        # Create user interaction record
         interaction = UserInteraction(
             interaction_type="clarification",
-            message=f"The research planner has identified {len(questions)} clarifying questions to help refine the research scope:",
+            message=f"Clarifying questions: {questions}",
             options=questions,
             required=False,
         )
 
         self.user_interactions.append(interaction)
-
-        # For now, we'll proceed without user input
-        # In a full implementation, you would pause here for user input
-        self.logger.info("📝 Proceeding with research based on current understanding")
+        print("=" * 60 + "\n")
 
     async def _request_plan_approval(
         self, research_plan, context: AgentContext
@@ -318,6 +343,56 @@ class ResearchOrchestrator(BaseAgent):
 {chr(10).join(f"- {criterion}" for criterion in research_plan.success_criteria)}
         """.strip()
 
+        if self.interactive_mode:
+            print("\n" + "=" * 70)
+            print("📋 RESEARCH PLAN FOR YOUR APPROVAL")
+            print("=" * 70)
+            print(plan_summary)
+            print("\n" + "=" * 70)
+
+            while True:
+                print("\nWhat would you like to do?")
+                print("1. ✅ Approve and proceed with this plan")
+                print("2. ✏️  Request modifications to the plan")
+                print("3. ❌ Cancel the research")
+
+                choice = input("\nEnter your choice (1-3): ").strip()
+
+                if choice == "1":
+                    print("✅ Research plan approved! Starting execution...\n")
+                    self.logger.info("📋 Research plan approved by user")
+                    break
+                elif choice == "2":
+                    print("\n📝 What modifications would you like to make?")
+                    modifications = input("Please describe your changes: ").strip()
+                    if modifications:
+                        context.user_requirements.update(
+                            {"plan_modifications": modifications}
+                        )
+                        print(
+                            "✅ Modifications noted. Proceeding with updated understanding...\n"
+                        )
+                        self.logger.info(
+                            f"📝 Plan modifications requested: {modifications}"
+                        )
+                        break
+                    else:
+                        print(
+                            "No modifications provided. Proceeding with original plan...\n"
+                        )
+                        break
+                elif choice == "3":
+                    print("❌ Research cancelled by user.")
+                    self.logger.info("❌ Research cancelled by user")
+                    return False
+                else:
+                    print("❌ Invalid choice. Please enter 1, 2, or 3.")
+        else:
+            # Auto-approve in non-interactive mode
+            self.logger.info(
+                "📋 Research plan generated and auto-approved for execution"
+            )
+
         interaction = UserInteraction(
             interaction_type="plan_approval",
             message=plan_summary,
@@ -326,10 +401,6 @@ class ResearchOrchestrator(BaseAgent):
         )
 
         self.user_interactions.append(interaction)
-
-        # For this implementation, auto-approve
-        # In a full implementation, you would wait for user input
-        self.logger.info("📋 Research plan generated and auto-approved for execution")
         return True
 
     async def _execute_research_stage(self, context: AgentContext) -> List[AgentResult]:
@@ -451,13 +522,17 @@ class ResearchOrchestrator(BaseAgent):
         }
 
     async def execute_research_workflow(
-        self, research_question: str, user_requirements: Dict[str, Any] = None
+        self,
+        research_question: str,
+        user_requirements: Dict[str, Any] = None,
+        research_plan: Any = None,
     ) -> ResearchWorkflowResult:
         """High-level method to execute a complete research workflow.
 
         Args:
             research_question: Research question to investigate
             user_requirements: Optional user requirements and preferences
+            research_plan: Optional pre-generated research plan (skips planning stage)
 
         Returns:
             Complete workflow result
@@ -467,6 +542,17 @@ class ResearchOrchestrator(BaseAgent):
             research_question=research_question,
             user_requirements=user_requirements or {},
         )
+
+        # If research plan is provided, add it to context to skip planning stage
+        if research_plan:
+            from .base_agent import AgentResult, AgentState
+
+            mock_planner_result = AgentResult(
+                agent_name="research_planner",
+                status=AgentState.COMPLETED,
+                data=research_plan,
+            )
+            context.agent_results["research_planner"] = mock_planner_result
 
         # Execute workflow
         result = await self.execute(context)

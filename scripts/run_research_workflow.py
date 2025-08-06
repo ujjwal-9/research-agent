@@ -34,6 +34,9 @@ Examples:
     python scripts/run_research_workflow.py "How does semantic chunking work?"
     python scripts/run_research_workflow.py "Compare vector databases" --detailed --format both
     python scripts/run_research_workflow.py "ML pipeline best practices" --collection custom_collection
+    python scripts/run_research_workflow.py "AI in healthcare" --interactive --validate
+    python scripts/run_research_workflow.py "Vector database indexing" --non-interactive --detailed
+    python scripts/run_research_workflow.py "Research trends" --no-code-interpreter
         """,
     )
 
@@ -77,6 +80,25 @@ Examples:
         help="Output directory for reports (default: docs)",
     )
 
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        default=True,
+        help="Enable interactive mode with clarification questions and plan approval (default: enabled)",
+    )
+
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Disable interactive mode for automated execution",
+    )
+
+    parser.add_argument(
+        "--no-code-interpreter",
+        action="store_true",
+        help="Disable Excel Code Interpreter analysis (default: enabled)",
+    )
+
     args = parser.parse_args()
 
     # Setup logging
@@ -87,8 +109,18 @@ Examples:
     logger.info(f"📝 Research Question: {args.research_question}")
 
     try:
+        # Determine interactive mode
+        interactive_mode = not args.non_interactive
+
         # Initialize workflow manager
-        manager = ResearchWorkflowManager(args.collection)
+        manager = ResearchWorkflowManager(args.collection, interactive_mode)
+
+        if interactive_mode:
+            print("🔬 Interactive Research Workflow Mode")
+            print(
+                "   You'll be asked clarifying questions and to approve the research plan."
+            )
+            print("   Use --non-interactive flag to disable this.\n")
 
         # Validate environment if requested
         if args.validate:
@@ -131,10 +163,16 @@ Examples:
         print(f"\n🔬 Conducting research on: {args.research_question}")
         print("⏳ This may take a few minutes...")
 
+        # Show code interpreter status
+        code_status = "enabled" if not args.no_code_interpreter else "disabled"
+        print(f"🔧 Code Interpreter: {code_status}")
+        logger.info(f"🔧 Code Interpreter: {code_status}")
+
         results = await manager.conduct_research(
             research_question=args.research_question,
             user_requirements=user_requirements,
             export_format=args.format,
+            use_code_interpreter=not args.no_code_interpreter,
         )
 
         # Display results summary

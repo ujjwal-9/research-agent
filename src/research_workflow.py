@@ -41,15 +41,17 @@ def setup_logging(log_level: str = "INFO"):
 class ResearchWorkflowManager:
     """High-level manager for research workflows."""
 
-    def __init__(self, collection_name: str = None):
+    def __init__(self, collection_name: str = None, interactive_mode: bool = True):
         """Initialize the research workflow manager.
 
         Args:
             collection_name: Qdrant collection name for document retrieval
+            interactive_mode: Whether to enable interactive user prompts
         """
         self.logger = logging.getLogger(__name__)
         self.collection_name = collection_name
-        self.orchestrator = ResearchOrchestrator(collection_name)
+        self.interactive_mode = interactive_mode
+        self.orchestrator = ResearchOrchestrator(collection_name, interactive_mode)
         self.report_generator = ReportGenerator()
 
     async def conduct_research(
@@ -57,6 +59,8 @@ class ResearchWorkflowManager:
         research_question: str,
         user_requirements: Dict[str, Any] = None,
         export_format: str = "markdown",
+        research_plan: Any = None,
+        use_code_interpreter: bool = True,
     ) -> Dict[str, Any]:
         """Conduct a complete research workflow.
 
@@ -64,6 +68,8 @@ class ResearchWorkflowManager:
             research_question: Research question to investigate
             user_requirements: Optional user requirements and preferences
             export_format: Export format for the report ("markdown", "json", or "both")
+            research_plan: Optional pre-generated research plan (from chat interface)
+            use_code_interpreter: Whether to use code interpreter for Excel analysis (default: True)
 
         Returns:
             Dictionary containing workflow results and exported reports
@@ -72,10 +78,19 @@ class ResearchWorkflowManager:
             self.logger.info("🚀 Starting research workflow")
             self.logger.info(f"📝 Research Question: {research_question}")
 
+            # Add code interpreter preference to user requirements
+            user_requirements = user_requirements or {}
+            user_requirements["use_code_interpreter"] = use_code_interpreter
+
+            # Log the code interpreter setting
+            status = "enabled" if use_code_interpreter else "disabled"
+            self.logger.info(f"🔧 Code Interpreter: {status}")
+
             # Execute workflow
             workflow_result = await self.orchestrator.execute_research_workflow(
                 research_question=research_question,
-                user_requirements=user_requirements or {},
+                user_requirements=user_requirements,
+                research_plan=research_plan,
             )
 
             # Export reports in requested format(s)
@@ -174,7 +189,7 @@ class ResearchWorkflowManager:
 
         # Test Qdrant connection
         try:
-            from .tools.document_retriever import DocumentRetriever
+            from src.tools.document_retriever import DocumentRetriever
 
             retriever = DocumentRetriever(self.collection_name)
             sources = retriever.get_all_sources()
@@ -201,19 +216,22 @@ class ResearchWorkflowManager:
 
 
 # Convenience functions for common use cases
-async def quick_research(research_question: str, collection_name: str = None) -> str:
+async def quick_research(
+    research_question: str, collection_name: str = None, interactive_mode: bool = False
+) -> str:
     """Conduct quick research and return markdown report.
 
     Args:
         research_question: Research question to investigate
         collection_name: Optional Qdrant collection name
+        interactive_mode: Whether to enable interactive user prompts
 
     Returns:
         Markdown formatted research report
     """
     setup_logging()
 
-    manager = ResearchWorkflowManager(collection_name)
+    manager = ResearchWorkflowManager(collection_name, interactive_mode)
     results = await manager.conduct_research(
         research_question=research_question, export_format="markdown"
     )
@@ -225,6 +243,7 @@ async def comprehensive_research(
     research_question: str,
     user_requirements: Dict[str, Any] = None,
     collection_name: str = None,
+    interactive_mode: bool = True,
 ) -> Dict[str, Any]:
     """Conduct comprehensive research with full workflow tracking.
 
@@ -232,13 +251,14 @@ async def comprehensive_research(
         research_question: Research question to investigate
         user_requirements: User requirements and preferences
         collection_name: Optional Qdrant collection name
+        interactive_mode: Whether to enable interactive user prompts
 
     Returns:
         Complete workflow results with all metadata
     """
     setup_logging()
 
-    manager = ResearchWorkflowManager(collection_name)
+    manager = ResearchWorkflowManager(collection_name, interactive_mode)
 
     # Validate environment first
     validation = await manager.validate_environment()

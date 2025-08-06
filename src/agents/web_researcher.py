@@ -11,9 +11,14 @@ from src.tools.web_content_fetcher import WebContentFetcher, WebContent
 from src.tools.link_extractor import ExtractedLink
 
 try:
-    from duckduckgo_search import DDGS
+    # Try the new package name first
+    from ddgs import DDGS
 except ImportError:
-    DDGS = None
+    try:
+        # Fall back to old package name
+        from duckduckgo_search import DDGS
+    except ImportError:
+        DDGS = None
 
 
 @dataclass
@@ -69,19 +74,40 @@ class WebResearcherAgent(BaseAgent):
             )
 
             # Research external topics from plan
+            self.logger.info(
+                f"🔍 Starting external topic research with {len(plan.external_search_topics)} topics"
+            )
+            for i, topic in enumerate(plan.external_search_topics, 1):
+                self.logger.info(f"   {i}. {topic}")
+
             topic_research = await self._research_external_topics(
                 plan.external_search_topics
+            )
+
+            self.logger.info(
+                f"📥 External topic research returned {len(topic_research)} results"
             )
 
             # Research extracted links if available
             link_research = []
             if analysis and analysis.extracted_links:
+                self.logger.info(
+                    f"🔗 Starting extracted link research with {len(analysis.extracted_links)} links"
+                )
                 link_research = await self._research_extracted_links(
                     analysis.extracted_links
                 )
+                self.logger.info(
+                    f"📥 Link research returned {len(link_research)} results"
+                )
+            else:
+                self.logger.info("🔗 No extracted links found for research")
 
             # Combine all web content
             all_web_content = topic_research + link_research
+            self.logger.info(
+                f"📊 Total web content collected: {len(all_web_content)} items"
+            )
 
             # Analyze and summarize findings
             research_summary = await self._create_research_summary(
@@ -142,6 +168,10 @@ class WebResearcherAgent(BaseAgent):
             List of WebContent objects
         """
         try:
+            if not topics:
+                self.logger.warning("⚠️ No external topics provided for research")
+                return []
+
             if not DDGS:
                 self.logger.warning(
                     "⚠️ DuckDuckGo search not available, using fallback URLs"
@@ -150,10 +180,32 @@ class WebResearcherAgent(BaseAgent):
 
             # Collect URLs from DuckDuckGo search results
             search_urls = []
+            successful_searches = 0
 
-            for topic in topics:
-                topic_urls = await self._search_duckduckgo(topic, max_results=5)
-                search_urls.extend(topic_urls)
+            for i, topic in enumerate(topics, 1):
+                self.logger.info(f"🔍 Searching topic {i}/{len(topics)}: {topic}")
+                try:
+                    topic_urls = await self._search_duckduckgo(topic, max_results=5)
+                    if topic_urls:
+                        search_urls.extend(topic_urls)
+                        successful_searches += 1
+                        self.logger.info(
+                            f"   ✅ Found {len(topic_urls)} URLs for: {topic}"
+                        )
+                    else:
+                        self.logger.warning(f"   ⚠️ No URLs found for: {topic}")
+                except Exception as e:
+                    self.logger.error(f"   ❌ Search failed for topic '{topic}': {e}")
+
+            self.logger.info(
+                f"📊 Search summary: {successful_searches}/{len(topics)} topics found URLs"
+            )
+
+            if not search_urls:
+                self.logger.warning(
+                    "⚠️ No URLs found from any external search, using fallback"
+                )
+                return await self._research_external_topics_fallback(topics)
 
             # Limit the number of URLs to avoid overwhelming
             limited_urls = search_urls[:20]  # Limit to 20 URLs total
@@ -165,18 +217,34 @@ class WebResearcherAgent(BaseAgent):
             # Fetch content from URLs
             web_content = await self.web_fetcher.fetch_multiple_urls(limited_urls)
 
-            # Filter successful results
-            successful_content = [w for w in web_content if not w.error and w.content]
+            # Filter successful results and log details
+            successful_content = []
+            for content in web_content:
+                if (
+                    not content.error
+                    and content.content
+                    and len(content.content.strip()) > 50
+                ):
+                    successful_content.append(content)
 
             self.logger.info(
-                f"Successfully fetched {len(successful_content)}/{len(limited_urls)} external sources"
+                f"📥 Successfully fetched {len(successful_content)}/{len(limited_urls)} external sources"
             )
+
+            if successful_content:
+                self.logger.info("✅ External research completed with results")
+            else:
+                self.logger.warning(
+                    "⚠️ External research completed but no usable content found"
+                )
 
             return web_content
 
         except Exception as e:
-            self.logger.error(f"Error researching external topics: {e}")
-            return []
+            self.logger.error(f"❌ Error researching external topics: {e}")
+            # Try fallback as last resort
+            self.logger.info("🔧 Attempting fallback external research")
+            return await self._research_external_topics_fallback(topics)
 
     async def _search_duckduckgo(self, query: str, max_results: int = 10) -> List[str]:
         """Search DuckDuckGo for URLs related to the query.
@@ -336,13 +404,17 @@ class WebResearcherAgent(BaseAgent):
         """
         try:
             search_urls = []
+            self.logger.info(f"🔧 Using fallback URLs for {len(topics)} topics")
 
-            for topic in topics:
+            for i, topic in enumerate(topics, 1):
+                self.logger.info(f"🔧 Generating fallback URLs for topic {i}: {topic}")
                 # Generate fallback medical URLs
-                search_urls.extend(self._generate_fallback_medical_urls(topic))
+                topic_urls = self._generate_fallback_medical_urls(topic)
+                search_urls.extend(topic_urls)
+                self.logger.info(f"   Generated {len(topic_urls)} fallback URLs")
 
             # Limit the number of URLs
-            limited_urls = search_urls[:20]
+            limited_urls = search_urls[:25]  # Slightly more URLs for fallback
 
             self.logger.info(
                 f"🔍 Fetching content from {len(limited_urls)} fallback URLs"
@@ -351,10 +423,21 @@ class WebResearcherAgent(BaseAgent):
             # Fetch content from URLs
             web_content = await self.web_fetcher.fetch_multiple_urls(limited_urls)
 
+            # Filter and count successful results
+            successful_content = [
+                w
+                for w in web_content
+                if not w.error and w.content and len(w.content.strip()) > 50
+            ]
+
+            self.logger.info(
+                f"📥 Fallback research: {len(successful_content)}/{len(limited_urls)} URLs returned usable content"
+            )
+
             return web_content
 
         except Exception as e:
-            self.logger.error(f"Error in fallback external research: {e}")
+            self.logger.error(f"❌ Error in fallback external research: {e}")
             return []
 
     async def _research_extracted_links(
